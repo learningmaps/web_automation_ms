@@ -41,7 +41,7 @@ def trigger_github_extraction(limit=10):
     repo = get_secret("GITHUB_REPO")
     
     if not token or not repo:
-        st.error("GitHub Credentials not configured.")
+        st.error(f"GitHub Credentials missing. Token: {'Set' if token else 'Missing'}, Repo: {repo if repo else 'Missing'}")
         return False
 
     url = f"https://api.github.com/repos/{repo}/actions/workflows/extract_pdfs.yml/dispatches"
@@ -52,8 +52,15 @@ def trigger_github_extraction(limit=10):
     # Explicitly set task to 'extract'
     data = {"ref": "main", "inputs": {"task": "extract", "limit": str(limit)}}
     
-    resp = requests.post(url, headers=headers, json=data)
-    return resp.status_code == 204
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        if resp.status_code != 204:
+            st.error(f"GitHub API Error: {resp.status_code} - {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"Request failed: {e}")
+        return False
 
 supabase = get_supabase()
 
@@ -84,7 +91,7 @@ with top_col5:
     
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Fetch", use_container_width=True, help="Fetch New PDF Links"):
+        if st.button("Fetch", width="stretch", help="Fetch New PDF Links"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             def update_progress(current, total, message):
@@ -97,7 +104,7 @@ with top_col5:
             except Exception as e:
                 st.error(f"Error: {e}")
     with c2:
-        if st.button("Extract", use_container_width=True, help="Extract Data from PDFs"):
+        if st.button("Extract", width="stretch", help="Extract Data from PDFs"):
             if trigger_github_extraction(batch_limit):
                 st.success("Triggered!")
             else:
@@ -126,7 +133,7 @@ with tab1:
         df_urls = df_urls[cols]
         st.dataframe(
             df_urls, 
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "pdf_url": st.column_config.LinkColumn("PDF Link")
             }
