@@ -7,3 +7,4 @@ python-dotenv
 pydantic
 beautifulsoup4
 lxml
+soupsieve
