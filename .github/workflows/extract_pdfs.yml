@@ -1,0 +1,51 @@
+name: MSTC PDF Extraction Pipeline
+
+on:
+  # Allows us to trigger it manually from GitHub or via API (from Streamlit)
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Number of PDFs to process'
+        required: false
+        default: '10'
+      task:
+        description: 'Task to run: "crawl", "extract", or "both"'
+        required: true
+        default: 'extract'
+
+  # Also runs every 6 hours automatically
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r projects/mstc_py/requirements.txt
+
+      - name: Run Crawler
+        if: ${{ github.event.inputs.task == 'crawl' || github.event.inputs.task == 'both' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python projects/mstc_py/scraper.py
+
+      - name: Run Extractor
+        if: ${{ github.event.inputs.task == 'extract' || github.event.inputs.task == 'both' || github.event_name == 'schedule' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIMIT: ${{ github.event.inputs.limit || '10' }}
+        run: python projects/mstc_py/main.py
