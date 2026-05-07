@@ -42,7 +42,7 @@ def extract_structured_data(
         ],
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
-            response_schema=response_model.model_json_schema()
+            response_schema=response_model  # Pass the class directly
         )
     )
     
