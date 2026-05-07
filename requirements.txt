@@ -8,3 +8,5 @@ pydantic
 beautifulsoup4
 lxml
 soupsieve
+markitdown[pdf]
+toml
