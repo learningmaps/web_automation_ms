@@ -2,8 +2,14 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 import os
+import sys
 import requests
 from dotenv import load_dotenv
+
+# Add current directory to path for local imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 load_dotenv()
 

@@ -1,0 +1,10 @@
+streamlit
+pandas
+supabase
+requests
+google-generativeai
+python-dotenv
+pydantic
+
+beautifulsoup4
+lxml
