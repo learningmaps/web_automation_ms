@@ -12,7 +12,7 @@ CREATE TABLE processed_pdfs (
 -- 2. Table for Mine Block Summaries (Page 1)
 CREATE TABLE mine_block_summaries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pdf_id UUID REFERENCES processed_pdfs(id) ON DELETE CASCADE,
+    pdf_id UUID UNIQUE REFERENCES processed_pdfs(id) ON DELETE CASCADE,
     block_name TEXT,
     state TEXT,
     district TEXT,
@@ -35,8 +35,8 @@ CREATE TABLE mine_block_summaries (
 -- 3. Table for NITs (Page 2 - Parent)
 CREATE TABLE tenders_nit (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pdf_id UUID REFERENCES processed_pdfs(id) ON DELETE CASCADE,
-    nit_number TEXT UNIQUE,
+    pdf_id UUID UNIQUE REFERENCES processed_pdfs(id) ON DELETE CASCADE,
+    nit_number TEXT,
     tranche TEXT,
     tender_date DATE,
     bid_submission_deadline TIMESTAMPTZ,

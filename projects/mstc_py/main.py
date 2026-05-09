@@ -75,7 +75,7 @@ def process_pending_pdfs(limit=10):
             # 3. Save Data
             if source == 'mine_block_summary':
                 d = extracted_data
-                supabase.table("mine_block_summaries").insert({
+                supabase.table("mine_block_summaries").upsert({
                     "pdf_id": pdf['id'],
                     "block_name": d.blockName,
                     "state": d.state,
@@ -94,11 +94,11 @@ def process_pending_pdfs(limit=10):
                     "geological_setting": d.geologicalSetting,
                     "toposheet_number": d.toposheetNumber,
                     "geographic_coordinates": d.geographicCoordinates
-                }).execute()
+                }, on_conflict="pdf_id").execute()
             
             elif source == 'nit':
                 d = extracted_data
-                nit_resp = supabase.table("tenders_nit").insert({
+                nit_resp = supabase.table("tenders_nit").upsert({
                     "pdf_id": pdf['id'],
                     "nit_number": d.nitNumber,
                     "tranche": d.tranche,
@@ -106,10 +106,13 @@ def process_pending_pdfs(limit=10):
                     "bid_submission_deadline": normalize_timestamp(d.bidSubmissionDeadline),
                     "tender_fee": d.tenderFee,
                     "bid_security_emd": d.bidSecurityEMD
-                }).execute()
+                }, on_conflict="pdf_id").execute()
                 
                 nit_id = nit_resp.data[0]['id']
                 if d.blocks:
+                    # Clear old blocks if this is an update
+                    supabase.table("tender_blocks").delete().eq("nit_id", nit_id).execute()
+                    
                     blocks_to_insert = [{
                         "nit_id": nit_id,
                         "sl_no": b.slNo,
