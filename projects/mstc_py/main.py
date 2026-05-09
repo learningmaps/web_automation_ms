@@ -1,6 +1,8 @@
 import os
 import requests
 import time
+import pandas as pd
+import re
 from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -8,6 +10,18 @@ from extractor import safe_extract
 from schemas import PAGE_SCHEMA_MAP
 
 load_dotenv()
+
+def normalize_timestamp(ts_str: str) -> str:
+    """Uses pandas to convert conversational dates to ISO format for PostgreSQL."""
+    if not ts_str or ts_str.lower() in ["n/a", "not specified", "none"]:
+        return None
+    try:
+        # Clean common LLM noise like "on or before" or timezone strings
+        clean_str = re.sub(r'on or before|hours|\(Indian Standard Time\)', '', ts_str, flags=re.IGNORECASE).strip()
+        dt = pd.to_datetime(clean_str)
+        return dt.isoformat()
+    except Exception:
+        return ts_str
 
 def get_supabase() -> Client:
     url = os.getenv("SUPABASE_URL")
@@ -88,8 +102,8 @@ def process_pending_pdfs(limit=10):
                     "pdf_id": pdf['id'],
                     "nit_number": d.nitNumber,
                     "tranche": d.tranche,
-                    "tender_date": d.tenderDate,
-                    "bid_submission_deadline": d.bidSubmissionDeadline,
+                    "tender_date": normalize_timestamp(d.tenderDate),
+                    "bid_submission_deadline": normalize_timestamp(d.bidSubmissionDeadline),
                     "tender_fee": d.tenderFee,
                     "bid_security_emd": d.bidSecurityEMD
                 }).execute()
