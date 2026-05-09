@@ -70,7 +70,10 @@ def extract_structured_data(
                 generation_config=genai.GenerationConfig(**generation_config)
             )
             
-            # Clean up response text in case the model wrapped it in markdown code blocks or added trailing text
+            if not response or not response.text:
+                raise Exception("Empty response from Gemini API")
+            
+            # Clean up response text
             text = response.text.strip()
             
             # Robust JSON extraction: Find the first '{' and the last '}'
@@ -82,9 +85,12 @@ def extract_structured_data(
             
             return response_model.model_validate_json(text)
         except Exception as e:
-            if ("429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)) and attempt < max_api_retries - 1:
-                wait = (attempt + 1) * 60 # Wait 1 min, then 2 mins
-                print(f"    [Gemini API] Rate limit hit. Waiting {wait}s before retry {attempt + 1}...")
+            error_msg = str(e)
+            is_transient = any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "500", "Internal error", "Service Unavailable", "deadline exceeded"])
+            
+            if is_transient and attempt < max_api_retries - 1:
+                wait = (attempt + 1) * 30
+                print(f"    [Gemini API] Transient error ({error_msg[:50]}...). Waiting {wait}s before retry {attempt + 1}...")
                 time.sleep(wait)
             else:
                 raise e

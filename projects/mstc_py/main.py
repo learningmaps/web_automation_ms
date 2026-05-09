@@ -42,14 +42,20 @@ def process_pending_pdfs(limit=10):
 
         try:
             # 1. Download
-            pdf_resp = requests.get(pdf_url)
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            pdf_resp = requests.get(pdf_url, headers=headers, timeout=30)
+            pdf_resp.raise_for_status()
             pdf_bytes = pdf_resp.content
+            
+            if len(pdf_bytes) < 1000:
+                 print(f"  !! Warning: PDF size unusually small ({len(pdf_bytes)} bytes)")
 
             # 2. Extract
             config = PAGE_SCHEMA_MAP.get(page_name)
             if not config:
                 raise ValueError(f"No schema found for {page_name}")
 
+            print(f"  -> Converting to Markdown and extracting...")
             extracted_data = safe_extract(pdf_bytes, config['model'], config['prompt'])
 
             # 3. Save Data
