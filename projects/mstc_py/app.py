@@ -207,13 +207,81 @@ with tab2:
 
 with tab3:
     st.subheader("NIT / Tender Details")
-    nit_resp = supabase.table("tenders_nit").select("*").execute()
-    if nit_resp.data:
-        df_nit = pd.DataFrame(nit_resp.data)
-        df_nit = format_dates(df_nit, ['tender_date', 'bid_submission_deadline'])
-        # Also clean up IDs in this table for consistency
-        cols_to_show = [c for c in df_nit.columns if c not in ['id', 'pdf_id']]
-        st.dataframe(df_nit[cols_to_show], use_container_width=True)
+    
+    # Fetch Data for Both Sections
+    blocks_query = "*, tenders_nit(nit_number, tranche, tender_date, bid_submission_deadline, processed_pdfs(discovered_at, file_id, pdf_url))"
+    blocks_nit_resp = supabase.table("tender_blocks").select(blocks_query).execute()
+    
+    if blocks_nit_resp.data:
+        df_all_nit = pd.DataFrame(blocks_nit_resp.data)
+        
+        # --- FLATTENING ---
+        if 'tenders_nit' in df_all_nit.columns:
+            nit_df = pd.json_normalize(df_all_nit['tenders_nit'])
+            df_all_nit = pd.concat([df_all_nit.drop(columns=['tenders_nit']), nit_df], axis=1)
+            
+        if 'processed_pdfs' in df_all_nit.columns:
+             pdf_meta = pd.json_normalize(df_all_nit['processed_pdfs'])
+             df_all_nit = pd.concat([df_all_nit.drop(columns=['processed_pdfs']), pdf_meta], axis=1)
+        
+        # Cleanup column names
+        df_all_nit.columns = [c.split('.')[-1] for c in df_all_nit.columns]
+        
+        # --- FILTERS ---
+        st.write("### Filters")
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            states = sorted(df_all_nit['state'].dropna().unique().tolist())
+            sel_states = st.multiselect("Filter by State", states, placeholder="All States")
+        with f2:
+            minerals = sorted(df_all_nit['mineral'].dropna().unique().tolist())
+            sel_minerals = st.multiselect("Filter by Mineral", minerals, placeholder="All Minerals")
+        with f3:
+            licenses = sorted(df_all_nit['license_type'].dropna().unique().tolist())
+            sel_licenses = st.multiselect("License Type", licenses, placeholder="All Types")
+
+        # Apply Filters
+        mask = pd.Series([True] * len(df_all_nit))
+        if sel_states: mask &= df_all_nit['state'].isin(sel_states)
+        if sel_minerals: mask &= df_all_nit['mineral'].isin(sel_minerals)
+        if sel_licenses: mask &= df_all_nit['license_type'].isin(sel_licenses)
+        
+        df_filtered = df_all_nit[mask].copy()
+        df_filtered = format_dates(df_filtered, ['tender_date', 'bid_submission_deadline', 'discovered_at'])
+
+        # --- 1. Tender Summaries (Grouped) ---
+        st.write("### Tender Summaries")
+        summary_cols = ['discovered_at', 'nit_number', 'tranche', 'tender_date', 'bid_submission_deadline', 'file_id', 'pdf_url']
+        df_summary = df_filtered[summary_cols].drop_duplicates().sort_values('discovered_at', ascending=False)
+        st.dataframe(
+            df_summary,
+            use_container_width=True,
+            column_config={"pdf_url": st.column_config.LinkColumn("PDF Link")}
+        )
+
+        st.divider()
+
+        # --- 2. Individual Tender Blocks (Analyst View) ---
+        st.write("### Individual Tender Blocks")
+        # Define clean, analytical column order
+        analyst_cols = [
+            'discovered_at', 'tender_date', 'bid_submission_deadline', 
+            'state', 'district', 'mineral', 'block_name', 
+            'license_type', 'reserve_price', 'nit_number', 'pdf_url'
+        ]
+        
+        # Ensure only existing columns are selected
+        final_cols = [c for c in analyst_cols if c in df_filtered.columns]
+        
+        st.dataframe(
+            df_filtered[final_cols].sort_values(['bid_submission_deadline', 'state']),
+            use_container_width=True,
+            column_config={
+                "pdf_url": st.column_config.LinkColumn("Source PDF"),
+                "bid_submission_deadline": st.column_config.TextColumn("Deadline", help="Final date for bid submission"),
+                "reserve_price": st.column_config.TextColumn("Reserve Price", help="Reserve price or percentage")
+            }
+        )
     else:
         st.info("No tender data extracted yet.")
 

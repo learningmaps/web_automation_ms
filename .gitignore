@@ -25,3 +25,5 @@ Thumbs.db
 
 # Maintenance and Testing
 maintenance/
+streamlit.log
+streamlit_output.log
