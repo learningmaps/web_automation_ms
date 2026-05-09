@@ -6,7 +6,7 @@
 
 ## Extraction Workflow
 - **Markdown Conversion**: Before sending data to the LLM for extraction, always convert PDFs to Markdown using `markitdown`.
-- **Model**: Use `gemini-3-flash-preview` (or the latest stable Flash model) for extraction tasks.
+- **Model**: Use `gemma-4-31b-it` (or the latest stable Flash model) for extraction tasks.
 - **Factuality**: Set `temperature=0.0` in the generation config to ensure deterministic and factual outputs.
 
 ## Available Models (Reference)

@@ -29,7 +29,7 @@ class MineBlockSummary(BaseModel):
 
 # 2. Notice Inviting Tender (NIT) Schema
 class TenderBlock(BaseModel):
-    slNo: Optional[str] = None
+    slNo: Optional[str] = Field(description="Serial number if available")
     state: str
     district: str = Field(description="The district where the block is located")
     blockName: str
@@ -50,10 +50,10 @@ class NIT(BaseModel):
 PAGE_SCHEMA_MAP = {
     'Mine Block Summary': {
         'model': MineBlockSummary,
-        'prompt': 'Extract detailed geological and land particulars from this Mine Block Summary.'
+        'prompt': 'Extract detailed geological and land particulars from this Mine Block Summary. Ensure the "toposheetNumber" is extracted from the "Location" or "General Information" section (e.g., SOI Toposheet Number).'
     },
     'Notice Inviting Tender': {
         'model': NIT,
-        'prompt': 'Extract tender dates, fees, and block names from this Notice Inviting Tender (NIT).'
+        'prompt': 'Extract tender details including dates, fees, and the full list of mineral blocks listed in the document. Ensure all columns in the block table are captured correctly.'
     }
 }

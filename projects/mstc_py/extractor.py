@@ -45,8 +45,21 @@ def extract_structured_data(
     markdown_text = pdf_to_markdown(pdf_bytes)
     
     model = genai.GenerativeModel("models/gemma-4-31b-it")
+    model_name = model.model_name
+    is_gemma = "gemma" in model_name.lower()
     
-    full_prompt = f"{prompt}\n\nDocument Content (Markdown):\n{markdown_text}"
+    # For Gemma models, we pass the schema in the prompt to avoid "Unknown field for Schema: default" or 500 errors
+    # For Gemini models, we use the SDK's response_schema for better reliability
+    generation_config = {
+        "response_mime_type": "application/json",
+        "temperature": 0.0
+    }
+    
+    if is_gemma:
+        full_prompt = f"{prompt}\n\nPlease return the data in the following JSON format: {response_model.model_json_schema()}\n\nDocument Content (Markdown):\n{markdown_text}"
+    else:
+        full_prompt = f"{prompt}\n\nDocument Content (Markdown):\n{markdown_text}"
+        generation_config["response_schema"] = response_model
     
     # Internal retry logic for the specific API call
     max_api_retries = 3
@@ -54,11 +67,7 @@ def extract_structured_data(
         try:
             response = model.generate_content(
                 full_prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    response_schema=response_model,
-                    temperature=0.0
-                )
+                generation_config=genai.GenerationConfig(**generation_config)
             )
             
             # Clean up response text in case the model wrapped it in markdown code blocks or added trailing text
