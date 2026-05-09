@@ -2,11 +2,15 @@
 
 ## Structure
 - **Maintenance Folder**: All testing, local validation, and maintenance scripts must be stored in the `/maintenance` directory.
-- **Git Safety**: The `/maintenance` folder is intended for local use only and must always be excluded from source control via `.gitignore`.
+- **Git Safety**: The `/maintenance` folder is intended for local use only and must always be excluded from source control via `.gitignore`. us this folder to perform all the  tests.
 
 ## Extraction Workflow
 - **Markdown Conversion**: Before sending data to the LLM for extraction, always convert PDFs to Markdown using `markitdown`.
-- **Model**: Use `gemma-4-31b-it` (or the latest stable Flash model) for extraction tasks.
+- **Sequential Fallback Strategy**: The system attempts extraction using a tiered list of models to maximize reliability. If a model fails, it automatically falls back to the next one in the following order:
+  1. `models/gemini-3.1-flash-lite` (Priority: High speed and stability)
+  2. `models/gemini-2.5-flash` (Priority: Mature reliability)
+  3. `models/gemini-3-flash-preview` (Priority: Deep reasoning)
+  4. `models/gemma-4-31b-it` (Final fallback)
 - **Factuality**: Set `temperature=0.0` in the generation config to ensure deterministic and factual outputs.
 
 ## Available Models (Reference)

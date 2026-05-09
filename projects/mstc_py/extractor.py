@@ -34,22 +34,27 @@ def pdf_to_markdown(pdf_bytes: bytes) -> str:
         if os.path.exists(temp_pdf_path):
             os.remove(temp_pdf_path)
 
+# Ordered list of models by performance and stability (May 2026)
+FALLBACK_MODELS = [
+    "models/gemini-3.1-flash-lite",   # Top Choice: Fast, stable, high quota
+    "models/gemini-2.5-flash",        # Second Choice: Mature and reliable
+    "models/gemini-3-flash-preview", # Third Choice: High reasoning, but slower
+    "models/gemma-4-31b-it"           # Final Fallback: Current default family
+]
+
 def extract_structured_data(
     pdf_bytes: bytes,
     response_model: Type[T],
-    prompt: str = "Extract the requested information from the attached document."
+    prompt: str,
+    model_id: str,
+    markdown_text: str
 ) -> T:
     """
-    Converts PDF to Markdown and extracts structured data using Gemini 3 Flash.
+    Core extraction logic for a single model attempt.
     """
-    markdown_text = pdf_to_markdown(pdf_bytes)
+    model = genai.GenerativeModel(model_id)
+    is_gemma = "gemma" in model_id.lower()
     
-    model = genai.GenerativeModel("models/gemma-4-31b-it")
-    model_name = model.model_name
-    is_gemma = "gemma" in model_name.lower()
-    
-    # For Gemma models, we pass the schema in the prompt to avoid "Unknown field for Schema: default" or 500 errors
-    # For Gemini models, we use the SDK's response_schema for better reliability
     generation_config = {
         "response_mime_type": "application/json",
         "temperature": 0.0
@@ -61,8 +66,8 @@ def extract_structured_data(
         full_prompt = f"{prompt}\n\nDocument Content (Markdown):\n{markdown_text}"
         generation_config["response_schema"] = response_model
     
-    # Internal retry logic for the specific API call
-    max_api_retries = 3
+    # Internal retry logic for transient API issues with THIS specific model
+    max_api_retries = 2
     for attempt in range(max_api_retries):
         try:
             response = model.generate_content(
@@ -73,15 +78,20 @@ def extract_structured_data(
             if not response or not response.text:
                 raise Exception("Empty response from Gemini API")
             
-            # Clean up response text
             text = response.text.strip()
             
-            # Robust JSON extraction: Find the first '{' and the last '}'
+            # Robust JSON extraction
             start_idx = text.find('{')
-            end_idx = text.rfind('}')
-            
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                text = text[start_idx:end_idx + 1]
+            if start_idx != -1:
+                count = 0
+                for i in range(start_idx, len(text)):
+                    if text[i] == '{':
+                        count += 1
+                    elif text[i] == '}':
+                        count -= 1
+                        if count == 0:
+                            text = text[start_idx:i+1]
+                            break
             
             return response_model.model_validate_json(text)
         except Exception as e:
@@ -89,26 +99,26 @@ def extract_structured_data(
             is_transient = any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "500", "Internal error", "Service Unavailable", "deadline exceeded"])
             
             if is_transient and attempt < max_api_retries - 1:
-                wait = (attempt + 1) * 30
-                print(f"    [Gemini API] Transient error ({error_msg[:50]}...). Waiting {wait}s before retry {attempt + 1}...")
+                wait = (attempt + 1) * 20
+                print(f"    [Model: {model_id}] Transient error. Waiting {wait}s before retry...")
                 time.sleep(wait)
             else:
                 raise e
 
-def safe_extract(pdf_bytes, response_model, prompt, max_retries=5):
+def safe_extract(pdf_bytes, response_model, prompt):
     """
-    Wrapper with exponential backoff for rate limits.
+    Attempts extraction using multiple models in sequence if errors occur.
     """
-    attempt = 0
-    while attempt < max_retries:
+    markdown_text = pdf_to_markdown(pdf_bytes)
+    
+    last_error = None
+    for model_id in FALLBACK_MODELS:
+        print(f"  -> Attempting extraction with {model_id}...")
         try:
-            return extract_structured_data(pdf_bytes, response_model, prompt)
+            return extract_structured_data(pdf_bytes, response_model, prompt, model_id, markdown_text)
         except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                attempt += 1
-                wait_time = (2 ** attempt) + 30
-                print(f"  -> Rate limit hit. Waiting {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                raise e
-    raise Exception("Max retries exceeded for Gemini extraction")
+            last_error = e
+            print(f"     ! {model_id} failed: {str(e)[:80]}...")
+            continue # Move to next model in sequence
+            
+    raise Exception(f"All models in fallback sequence failed. Last error: {last_error}")
