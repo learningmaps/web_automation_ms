@@ -111,7 +111,8 @@ st.markdown("""
     /* Nav Button Refinement - Maintain Accent with Icon Support */
     div[data-testid="stColumn"] button[key="nav_home"],
     div[data-testid="stColumn"] button[key="nav_mstc"],
-    div[data-testid="stColumn"] button[key="nav_parivesh"] {
+    div[data-testid="stColumn"] button[key="nav_parivesh"],
+    div[data-testid="stColumn"] button[key="nav_refresh"] {
         width: 44px !important;
         height: 44px !important;
         display: flex !important;
@@ -134,6 +135,17 @@ st.markdown("""
         margin-top: 1px !important;
         font-size: 24px !important;
     }
+    /* Special styling for Refresh Button (Black background, White icon) */
+    div[data-testid="stColumn"] button[key="nav_refresh"] {
+        background-color: #0F172A !important;
+        border-color: #0F172A !important;
+    }
+    div[data-testid="stColumn"] button[key="nav_refresh"] [data-testid="stIconMaterial"],
+    div[data-testid="stColumn"] button[key="nav_refresh"] span:first-child {
+        color: white !important;
+        font-size: 22px !important;
+    }
+    
     div[data-testid="stColumn"] button[key="nav_home"]:hover [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_home"]:hover span:first-child,
     div[data-testid="stColumn"] button[key="nav_mstc"]:hover [data-testid="stIconMaterial"],
@@ -141,6 +153,11 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_parivesh"]:hover [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_parivesh"]:hover span:first-child {
         color: white !important;
+    }
+    /* Refresh Hover Effect */
+    div[data-testid="stColumn"] button[key="nav_refresh"]:hover {
+        background-color: #1E293B !important;
+        border-color: #1E293B !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -192,7 +209,7 @@ def go_home():
 
 # ─── TOP NAVIGATION ───
 if st.session_state.active_app:
-    c1, c2, _ = st.columns([1, 1, 24])
+    c1, c2, c3, _ = st.columns([1, 1, 1, 23])
     with c1:
         if st.button("", icon=":material/home:", help="Home", key="nav_home"):
             go_home()
@@ -205,6 +222,9 @@ if st.session_state.active_app:
             if st.button("", icon=":material/layers:", help="Switch to MSTC Dashboard", key="nav_mstc"):
                 st.session_state.active_app = "mstc"
                 st.rerun()
+    with c3:
+        if st.button("", icon=":material/refresh:", help="Refresh Data", key="nav_refresh"):
+            st.rerun()
 
 # ─── APP ROUTING ───
 if st.session_state.active_app == "mstc":
