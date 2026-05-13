@@ -50,7 +50,7 @@ class NIT(BaseModel):
 PAGE_SCHEMA_MAP = {
     'Mine Block Summary': {
         'model': MineBlockSummary,
-        'prompt': 'Extract detailed geological and land particulars from this Mine Block Summary. Ensure the "toposheetNumber" is extracted from the "Location" or "General Information" section (e.g., SOI Toposheet Number).'
+        'prompt': 'Extract detailed geological and land particulars. For "geographicCoordinates", prioritize the "Annexure" or the table showing "Corner Points" (Points A, B, C, etc.). If only a range is available, use that, but corner points are preferred. Ensure the "toposheetNumber" is extracted from the "Location" or "General Information" section (e.g., SOI Toposheet Number).'
     },
     'Notice Inviting Tender': {
         'model': NIT,

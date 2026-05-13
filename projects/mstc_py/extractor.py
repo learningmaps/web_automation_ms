@@ -9,20 +9,20 @@ from common.document_processing import convert_pdf_to_markdown
 load_dotenv()
 
 # Configure Gemini
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("GEMINI_API_KEY not found in environment")
+primary_key = os.getenv("GEMINI_API_KEY")
+secondary_key = os.getenv("GEMINI_API_KEY_D")
 
-genai.configure(api_key=api_key)
+if not primary_key:
+    raise ValueError("GEMINI_API_KEY not found in environment")
 
 T = TypeVar("T", bound=BaseModel)
 
-# Ordered list of models by performance and stability (May 2026)
+# Ordered list of models by performance and stability
 FALLBACK_MODELS = [
-    "models/gemini-3.1-flash-lite",   # Top Choice: Fast, stable, high quota
-    "models/gemini-2.5-flash",        # Second Choice: Mature and reliable
-    "models/gemini-3-flash-preview", # Third Choice: High reasoning, but slower
-    "models/gemma-4-31b-it"           # Final Fallback: Current default family
+    "models/gemini-3.1-flash-lite",
+    "models/gemini-2.5-flash",
+    "models/gemini-3-flash-preview",
+    "models/gemma-4-31b-it"
 ]
 
 def extract_structured_data(
@@ -30,11 +30,13 @@ def extract_structured_data(
     response_model: Type[T],
     prompt: str,
     model_id: str,
-    markdown_text: str
+    markdown_text: str,
+    api_key: str
 ) -> T:
     """
-    Core extraction logic for a single model attempt.
+    Core extraction logic for a single model attempt with a specific API key.
     """
+    genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_id)
     is_gemma = "gemma" in model_id.lower()
     
@@ -49,7 +51,7 @@ def extract_structured_data(
         full_prompt = f"{prompt}\n\nDocument Content (Markdown):\n{markdown_text}"
         generation_config["response_schema"] = response_model
     
-    # Internal retry logic for transient API issues with THIS specific model
+    # Internal retry logic for transient API issues with THIS specific model/key combo
     max_api_retries = 2
     for attempt in range(max_api_retries):
         try:
@@ -90,18 +92,25 @@ def extract_structured_data(
 
 def safe_extract(pdf_bytes, response_model, prompt):
     """
-    Attempts extraction using multiple models in sequence if errors occur.
+    Attempts extraction using multiple models and multiple API keys in sequence.
+    Strategy: For each model, try Key 1, then Key 2, before moving to the next model.
     """
     markdown_text = convert_pdf_to_markdown(pdf_bytes)
     
+    keys = [primary_key]
+    if secondary_key:
+        keys.append(secondary_key)
+        
     last_error = None
     for model_id in FALLBACK_MODELS:
-        print(f"  -> Attempting extraction with {model_id}...")
-        try:
-            return extract_structured_data(pdf_bytes, response_model, prompt, model_id, markdown_text)
-        except Exception as e:
-            last_error = e
-            print(f"     ! {model_id} failed: {str(e)[:80]}...")
-            continue # Move to next model in sequence
+        for i, key in enumerate(keys):
+            key_label = "Primary" if i == 0 else "Secondary"
+            print(f"  -> Attempting {model_id} with {key_label} Key...")
+            try:
+                return extract_structured_data(pdf_bytes, response_model, prompt, model_id, markdown_text, key)
+            except Exception as e:
+                last_error = e
+                print(f"     ! {key_label} Key failed for {model_id}: {str(e)[:80]}...")
+                continue # Try the next key for this model, or next model
             
-    raise Exception(f"All models in fallback sequence failed. Last error: {last_error}")
+    raise Exception(f"All models and keys in fallback sequence failed. Last error: {last_error}")
