@@ -271,19 +271,7 @@ def run_mstc():
             df_filtered = df_all_nit[mask].copy()
             df_filtered = format_dates(df_filtered, ['tender_date', 'bid_submission_deadline', 'discovered_at'])
 
-            # --- 1. Tender Summaries (Grouped) ---
-            st.write("### Tender Summaries")
-            summary_cols = ['discovered_at', 'nit_number', 'tranche', 'tender_date', 'bid_submission_deadline', 'file_id', 'pdf_url']
-            df_summary = df_filtered[summary_cols].drop_duplicates().sort_values('discovered_at', ascending=False)
-            st.dataframe(
-                df_summary,
-                use_container_width=True,
-                column_config={"pdf_url": st.column_config.LinkColumn("PDF Link")}
-            )
-
-            st.divider()
-
-            # --- 2. Individual Tender Blocks (Analyst View) ---
+            # --- 1. Individual Tender Blocks (Analyst View) ---
             st.write("### Individual Tender Blocks")
             # Define clean, analytical column order
             analyst_cols = [
@@ -303,6 +291,18 @@ def run_mstc():
                     "bid_submission_deadline": st.column_config.TextColumn("Deadline", help="Final date for bid submission"),
                     "reserve_price": st.column_config.TextColumn("Reserve Price", help="Reserve price or percentage")
                 }
+            )
+
+            st.divider()
+
+            # --- 2. Tender Summaries (Grouped) ---
+            st.write("### Tender Summaries")
+            summary_cols = ['discovered_at', 'nit_number', 'tranche', 'tender_date', 'bid_submission_deadline', 'file_id', 'pdf_url']
+            df_summary = df_filtered[summary_cols].drop_duplicates().sort_values('discovered_at', ascending=False)
+            st.dataframe(
+                df_summary,
+                use_container_width=True,
+                column_config={"pdf_url": st.column_config.LinkColumn("PDF Link")}
             )
         else:
             st.info("No tender data extracted yet.")
