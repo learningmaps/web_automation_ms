@@ -1,7 +1,11 @@
 # Project Instructions
 
+## Visual Identity
+- **Accent Color**: Always use `#ff4b4b` (Streamlit Red) as the primary accent color for buttons, active states, and highlights.
+
 ## Structure
 - **Maintenance Folder**: All testing, local validation, and maintenance scripts must be stored in the `/maintenance` directory.
+- **Playwright Learnings**: All Playwright-based scraper research and learning markdown files must be stored in the `/playwright_mcp/learnings/` directory.
 - **Git Safety**: The `/maintenance` folder is intended for local use only and must always be excluded from source control via `.gitignore`. us this folder to perform all the  tests.
 
 ## Extraction Workflow

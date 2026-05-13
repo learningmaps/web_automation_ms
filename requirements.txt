@@ -1,12 +1,19 @@
+# Core Frameworks
 streamlit
 pandas
+xlsxwriter
+
+# Database & API
 supabase
+psycopg2-binary
 requests
 google-generativeai
 python-dotenv
 pydantic
+
+# PDF & Data Processing
+markitdown[pdf]
 beautifulsoup4
 lxml
 soupsieve
-markitdown[pdf]
 toml

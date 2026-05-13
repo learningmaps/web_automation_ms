@@ -33,7 +33,7 @@ def process_pending_pdfs(limit=10):
     print(f"--- STARTING PDF EXTRACTOR (PYTHON) - Limit: {limit} ---")
 
     # Fetch non-processed PDFs (pending or failed)
-    resp = supabase.table("processed_pdfs") \
+    resp = supabase.schema("mstc").table("processed_pdfs") \
         .select("*") \
         .neq("status", "processed") \
         .limit(limit) \
@@ -75,7 +75,7 @@ def process_pending_pdfs(limit=10):
             # 3. Save Data
             if source == 'mine_block_summary':
                 d = extracted_data
-                supabase.table("mine_block_summaries").upsert({
+                supabase.schema("mstc").table("mine_block_summaries").upsert({
                     "pdf_id": pdf['id'],
                     "block_name": d.blockName,
                     "state": d.state,
@@ -98,7 +98,7 @@ def process_pending_pdfs(limit=10):
             
             elif source == 'nit':
                 d = extracted_data
-                nit_resp = supabase.table("tenders_nit").upsert({
+                nit_resp = supabase.schema("mstc").table("tenders_nit").upsert({
                     "pdf_id": pdf['id'],
                     "nit_number": d.nitNumber,
                     "tranche": d.tranche,
@@ -111,7 +111,7 @@ def process_pending_pdfs(limit=10):
                 nit_id = nit_resp.data[0]['id']
                 if d.blocks:
                     # Clear old blocks if this is an update
-                    supabase.table("tender_blocks").delete().eq("nit_id", nit_id).execute()
+                    supabase.schema("mstc").table("tender_blocks").delete().eq("nit_id", nit_id).execute()
                     
                     blocks_to_insert = [{
                         "nit_id": nit_id,
@@ -123,10 +123,10 @@ def process_pending_pdfs(limit=10):
                         "license_type": b.licenseType,
                         "reserve_price": b.reservePrice
                     } for b in d.blocks]
-                    supabase.table("tender_blocks").insert(blocks_to_insert).execute()
+                    supabase.schema("mstc").table("tender_blocks").insert(blocks_to_insert).execute()
 
             # 4. Mark as Processed
-            supabase.table("processed_pdfs").update({
+            supabase.schema("mstc").table("processed_pdfs").update({
                 "status": "processed",
                 "extracted_at": datetime.now().isoformat()
             }).eq("id", pdf['id']).execute()
@@ -140,7 +140,7 @@ def process_pending_pdfs(limit=10):
 
         except Exception as e:
             print(f"  !! Failed: {e}")
-            supabase.table("processed_pdfs").update({"status": "failed"}).eq("id", pdf['id']).execute()
+            supabase.schema("mstc").table("processed_pdfs").update({"status": "failed"}).eq("id", pdf['id']).execute()
 
 if __name__ == "__main__":
     limit = int(os.getenv("LIMIT", "10"))

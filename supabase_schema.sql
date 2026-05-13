@@ -57,14 +57,14 @@ CREATE TABLE tender_blocks (
     reserve_price TEXT
 );
 
--- Enable RLS (Optional, but recommended if you use the Supabase UI/API)
+-- Enable RLS
 ALTER TABLE processed_pdfs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mine_block_summaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenders_nit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tender_blocks ENABLE ROW LEVEL SECURITY;
 
--- Create policy to allow all for now (adjust as needed for security)
-CREATE POLICY "Allow all" ON processed_pdfs FOR ALL USING (true);
-CREATE POLICY "Allow all" ON mine_block_summaries FOR ALL USING (true);
-CREATE POLICY "Allow all" ON tenders_nit FOR ALL USING (true);
-CREATE POLICY "Allow all" ON tender_blocks FOR ALL USING (true);
+-- Secure Policies: Public can read, Service Role bypasses to write
+CREATE POLICY "Public Read Access" ON processed_pdfs FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON mine_block_summaries FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON tenders_nit FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON tender_blocks FOR SELECT USING (true);

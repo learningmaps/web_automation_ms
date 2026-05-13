@@ -1,13 +1,10 @@
 import google.generativeai as genai
 import os
-import base64
-import json
 import time
-import tempfile
 from typing import Type, TypeVar
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from markitdown import MarkItDown
+from common.document_processing import convert_pdf_to_markdown
 
 load_dotenv()
 
@@ -19,20 +16,6 @@ if not api_key:
 genai.configure(api_key=api_key)
 
 T = TypeVar("T", bound=BaseModel)
-
-def pdf_to_markdown(pdf_bytes: bytes) -> str:
-    """Converts PDF bytes to Markdown text using MarkItDown."""
-    md = MarkItDown()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
-        temp_pdf.write(pdf_bytes)
-        temp_pdf_path = temp_pdf.name
-    
-    try:
-        result = md.convert(temp_pdf_path)
-        return result.text_content
-    finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
 
 # Ordered list of models by performance and stability (May 2026)
 FALLBACK_MODELS = [
@@ -109,7 +92,7 @@ def safe_extract(pdf_bytes, response_model, prompt):
     """
     Attempts extraction using multiple models in sequence if errors occur.
     """
-    markdown_text = pdf_to_markdown(pdf_bytes)
+    markdown_text = convert_pdf_to_markdown(pdf_bytes)
     
     last_error = None
     for model_id in FALLBACK_MODELS:

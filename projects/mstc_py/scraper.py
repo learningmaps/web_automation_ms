@@ -59,7 +59,7 @@ def scrape_links(progress_callback=None):
     # 3. Single batch fetch of existing records
     # Supabase allows up to ~1000 items in an 'in' filter usually, 
     # for 130+ items this is perfectly safe.
-    existing_resp = supabase.table("processed_pdfs") \
+    existing_resp = supabase.schema("mstc").table("processed_pdfs") \
         .select("file_id") \
         .in_("file_id", unique_ids) \
         .execute()
@@ -81,7 +81,7 @@ def scrape_links(progress_callback=None):
     if to_insert:
         if progress_callback:
             progress_callback(80, 100, f"Pushing {new_count} new links to database...")
-        supabase.table("processed_pdfs").insert(to_insert).execute()
+        supabase.schema("mstc").table("processed_pdfs").insert(to_insert).execute()
         print(f"Added {new_count} new links in a single batch.")
     else:
         print("No new links discovered.")
