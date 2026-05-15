@@ -184,12 +184,25 @@ def run_mstc():
                 min_date, max_date = dates.min().date(), dates.max().date()
                 date_range = st.date_input("Discovered Range", [min_date, max_date])
                 
+            # Filter options dynamically
+            df_for_states = df_blocks
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                df_for_states = df_blocks[
+                    (pd.to_datetime(df_blocks['discovered_at']).dt.date >= start_date) & 
+                    (pd.to_datetime(df_blocks['discovered_at']).dt.date <= end_date)
+                ]
+
             with f_col2:
-                states = sorted(df_blocks['state'].dropna().unique().tolist())
+                states = sorted(df_for_states['state'].dropna().unique().tolist())
                 selected_states = st.multiselect("State", states, placeholder="All States")
                 
+            df_for_districts = df_for_states
+            if selected_states:
+                df_for_districts = df_for_states[df_for_states['state'].isin(selected_states)]
+
             with f_col3:
-                districts = sorted(df_blocks['district'].dropna().unique().tolist())
+                districts = sorted(df_for_districts['district'].dropna().unique().tolist())
                 selected_districts = st.multiselect("District", districts, placeholder="All Districts")
 
             # Apply Filters
@@ -255,11 +268,23 @@ def run_mstc():
             with f1:
                 states = sorted(df_all_nit['state'].dropna().unique().tolist())
                 sel_states = st.multiselect("Filter by State", states, placeholder="All States")
+            
+            # Filter minerals based on state
+            df_for_minerals = df_all_nit
+            if sel_states:
+                df_for_minerals = df_all_nit[df_all_nit['state'].isin(sel_states)]
+                
             with f2:
-                minerals = sorted(df_all_nit['mineral'].dropna().unique().tolist())
+                minerals = sorted(df_for_minerals['mineral'].dropna().unique().tolist())
                 sel_minerals = st.multiselect("Filter by Mineral", minerals, placeholder="All Minerals")
+            
+            # Filter licenses based on state and mineral
+            df_for_licenses = df_for_minerals
+            if sel_minerals:
+                df_for_licenses = df_for_minerals[df_for_minerals['mineral'].isin(sel_minerals)]
+
             with f3:
-                licenses = sorted(df_all_nit['license_type'].dropna().unique().tolist())
+                licenses = sorted(df_for_licenses['license_type'].dropna().unique().tolist())
                 sel_licenses = st.multiselect("License Type", licenses, placeholder="All Types")
 
             # Apply Filters
