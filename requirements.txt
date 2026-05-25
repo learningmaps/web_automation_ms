@@ -12,6 +12,7 @@ python-dotenv
 pydantic
 
 # PDF & Data Processing
+playwright
 markitdown[pdf]
 beautifulsoup4
 lxml

@@ -7,7 +7,6 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 import google.generativeai as genai
-from playwright.sync_api import sync_playwright
 from datetime import datetime
 
 # Import project components
@@ -400,6 +399,7 @@ def generate_pdf_printout(html_content, output_path):
     """
     Uses headless Playwright to load the HTML locally and print to a PDF.
     """
+    from playwright.sync_api import sync_playwright
     # Wrap in standard Playwright context
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
