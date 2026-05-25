@@ -67,9 +67,10 @@ graph TD
 - **Data Table**: Displays a consolidated view of Agendas and Minutes of Meetings (MOM).
 
 ### 2.4 Bastar Court Portal (`projects/bdc_scrape/app.py`)
-- **Metrics Bar**: Displays total cases, pending vs disposed, and latest sync timestamp.
+- **Metrics Bar**: Displays total cases, pending vs disposed, and the "Data Last Synced" timestamp.
 - **Controls**:
-  - **Fetch & Sync Cases**: Run the direct HTTP scraper to fetch case status records for configured case types and years.
+  - **Sync**: Triggers the remote GitHub Actions scraper workflow asynchronously to fetch the latest cases.
+  - **Refresh**: Reloads the dashboard data from Supabase immediately via a streamlit rerun.
 - **Data Views**:
   - **Case List**: Displays a paginated, filterable table of court cases.
   - **Case Details Viewer**: Detail view showing full dynamic case history, business/orders, and transfers.

@@ -72,17 +72,25 @@ def run_bdc():
     
     # --- HEADER, STATS & CONTROLS ---
     # Fetch stats
-    stats_data = run_query("SELECT case_status FROM bdc.cases")
+    stats_data = run_query("SELECT case_status, last_synced FROM bdc.cases")
     df_stats = pd.DataFrame(stats_data) if stats_data else pd.DataFrame()
     
     total_cases = len(df_stats) if not df_stats.empty else 0
     total_pending = len(df_stats[df_stats['case_status'].str.lower() == 'pending']) if not df_stats.empty else 0
     total_disposed = len(df_stats[df_stats['case_status'].str.lower() == 'disposed']) if not df_stats.empty else 0
     
+    # Calculate last synced timestamp
+    last_sync_str = "Never"
+    if not df_stats.empty and 'last_synced' in df_stats.columns:
+        max_sync = df_stats['last_synced'].max()
+        if pd.notna(max_sync):
+            last_sync_str = max_sync[:16].replace('T', ' ') if isinstance(max_sync, str) else max_sync.strftime("%Y-%m-%d %H:%M")
+            
     top_col1, top_col2, top_col3, top_col4, top_col5 = st.columns([2, 1, 1, 1, 1.5])
     
     with top_col1:
         st.title("Bastar Court Cases")
+        st.caption(f"Data Last Synced: {last_sync_str}")
         
     with top_col2:
         st.metric("Total Cases", total_cases)
@@ -96,10 +104,15 @@ def run_bdc():
     with top_col5:
         st.write("") # Alignment spacing
         st.write("")
-        if st.button("Sync Cases", use_container_width=True, help="Trigger the GitHub Action scraper workflow to fetch the latest cases"):
-            with st.spinner("Triggering workflow on GitHub Actions..."):
-                if trigger_github_sync():
-                    st.success("Sync workflow triggered! The scraper is now running on GitHub Actions. Data will populate in the dashboard shortly.")
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("Sync", use_container_width=True, help="Trigger the GitHub Action scraper workflow to fetch the latest cases"):
+                with st.spinner("Triggering..."):
+                    if trigger_github_sync():
+                        st.toast("Sync workflow triggered successfully!")
+        with btn_col2:
+            if st.button("Refresh", use_container_width=True, help="Reload dashboard data from the database"):
+                st.rerun()
                 
     st.divider()
     
