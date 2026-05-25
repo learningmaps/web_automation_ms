@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import requests
 import sys
 from dotenv import load_dotenv
 
@@ -34,8 +35,32 @@ def run_query(query, params=None):
         cur.close()
         conn.close()
 
+def trigger_github_sync():
+    token = get_secret("GITHUB_TOKEN")
+    repo = get_secret("GITHUB_REPO")
+    
+    if not token or not repo:
+        st.error("GitHub Credentials missing. Checksecrets.toml or environment variables.")
+        return False
+
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/bdc_scrape.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    data = {"ref": "main"}
+    
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        if resp.status_code != 204:
+            st.error(f"GitHub API Error: {resp.status_code} - {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"Request failed: {e}")
+        return False
+
 def run_bdc():
-    from scraper import sync
     
     # --- HEADER, STATS & CONTROLS ---
     # Fetch stats
@@ -63,20 +88,10 @@ def run_bdc():
     with top_col5:
         st.write("") # Alignment spacing
         st.write("")
-        if st.button("Sync Cases", use_container_width=True, help="Fetch latest cases from Bastar District Court"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            def update_progress(current, total, message):
-                progress_bar.progress(current / total)
-                status_text.text(message)
-                
-            try:
-                synced = sync(progress_callback=update_progress)
-                st.success(f"Sync complete. Synced {synced} cases.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Sync failed: {e}")
+        if st.button("Sync Cases", use_container_width=True, help="Trigger the GitHub Action scraper workflow to fetch the latest cases"):
+            with st.spinner("Triggering workflow on GitHub Actions..."):
+                if trigger_github_sync():
+                    st.success("Sync workflow triggered! The scraper is now running on GitHub Actions. Data will populate in the dashboard shortly.")
                 
     st.divider()
     
