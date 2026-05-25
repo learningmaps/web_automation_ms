@@ -61,6 +61,14 @@ def trigger_github_sync():
         return False
 
 def run_bdc():
+    # Stable tabs layout style to prevent page/screen jumping when switching tabs
+    st.markdown("""
+        <style>
+            [data-testid="stTabPanel"] {
+                min-height: 380px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
     
     # --- HEADER, STATS & CONTROLS ---
     # Fetch stats
@@ -218,7 +226,7 @@ def run_bdc():
             if acts_list:
                 df_acts = pd.DataFrame(acts_list)
                 df_acts.columns = ['Act Name', 'Section(s)']
-                st.dataframe(df_acts, use_container_width=True, hide_index=True)
+                st.dataframe(df_acts, height=300, use_container_width=True, hide_index=True)
             else:
                 st.info("No acts or sections recorded.")
                 
@@ -239,7 +247,7 @@ def run_bdc():
                 df_hist_display = df_hist[['business_date', 'hearing_date', 'purpose', 'judge', 'business_text']].copy()
                 df_hist_display.columns = ['Business Date', 'Next Hearing Date', 'Purpose of Hearing', 'Presiding Judge', 'Proceedings Text']
                 
-                st.dataframe(df_hist_display, use_container_width=True, hide_index=True)
+                st.dataframe(df_hist_display, height=300, use_container_width=True, hide_index=True)
             else:
                 st.info("No hearing history recorded.")
                 
@@ -255,6 +263,7 @@ def run_bdc():
                 
                 st.dataframe(
                     df_orders_display,
+                    height=300,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
