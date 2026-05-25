@@ -112,6 +112,7 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_home"],
     div[data-testid="stColumn"] button[key="nav_mstc"],
     div[data-testid="stColumn"] button[key="nav_parivesh"],
+    div[data-testid="stColumn"] button[key="nav_bdc"],
     div[data-testid="stColumn"] button[key="nav_refresh"] {
         width: 44px !important;
         height: 44px !important;
@@ -127,7 +128,9 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_mstc"] [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_mstc"] span:first-child,
     div[data-testid="stColumn"] button[key="nav_parivesh"] [data-testid="stIconMaterial"],
-    div[data-testid="stColumn"] button[key="nav_parivesh"] span:first-child {
+    div[data-testid="stColumn"] button[key="nav_parivesh"] span:first-child,
+    div[data-testid="stColumn"] button[key="nav_bdc"] [data-testid="stIconMaterial"],
+    div[data-testid="stColumn"] button[key="nav_bdc"] span:first-child {
         color: #ff4b4b !important;
         display: flex !important;
         align-items: center !important;
@@ -151,7 +154,9 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_mstc"]:hover [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_mstc"]:hover span:first-child,
     div[data-testid="stColumn"] button[key="nav_parivesh"]:hover [data-testid="stIconMaterial"],
-    div[data-testid="stColumn"] button[key="nav_parivesh"]:hover span:first-child {
+    div[data-testid="stColumn"] button[key="nav_parivesh"]:hover span:first-child,
+    div[data-testid="stColumn"] button[key="nav_bdc"]:hover [data-testid="stIconMaterial"],
+    div[data-testid="stColumn"] button[key="nav_bdc"]:hover span:first-child {
         color: white !important;
     }
     /* Refresh Hover Effect */
@@ -164,11 +169,12 @@ st.markdown("""
 
 # ─── DATA UTILITIES ───
 def get_hub_metrics():
-    """Fetch high-value stats from both schemas with 7-day velocity."""
+    """Fetch high-value stats from schemas with 7-day velocity."""
     db_url = os.getenv("DATABASE_URL")
     metrics = {
         "mstc_blocks": 0, "mstc_total": 0, "mstc_7d": 0,
-        "parivesh_hits": 0, "parivesh_total": 0, "parivesh_7d": 0
+        "parivesh_hits": 0, "parivesh_total": 0, "parivesh_7d": 0,
+        "bdc_total": 0, "bdc_pending": 0, "bdc_7d": 0
     }
     if not db_url: return metrics
     
@@ -193,6 +199,14 @@ def get_hub_metrics():
         # Velocity: New agendas in last 7 days (checking created_on or processed_on)
         cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE processed_on::timestamp > NOW() - INTERVAL '7 days'")
         metrics["parivesh_7d"] = cur.fetchone()[0]
+
+        # --- BDC Group ---
+        cur.execute("SELECT COUNT(*) FROM bdc.cases")
+        metrics["bdc_total"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM bdc.cases WHERE LOWER(case_status) = 'pending'")
+        metrics["bdc_pending"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM bdc.cases WHERE last_synced::timestamp > NOW() - INTERVAL '7 days'")
+        metrics["bdc_7d"] = cur.fetchone()[0]
         
         conn.close()
     except Exception:
@@ -209,20 +223,23 @@ def go_home():
 
 # ─── TOP NAVIGATION ───
 if st.session_state.active_app:
-    c1, c2, c3, _ = st.columns([1, 1, 1, 23])
+    c1, c2, c3, c4, c5, _ = st.columns([1, 1, 1, 1, 1, 21])
     with c1:
         if st.button("", icon=":material/home:", help="Home", key="nav_home"):
             go_home()
     with c2:
-        if st.session_state.active_app == "mstc":
-            if st.button("", icon=":material/eco:", help="Switch to Parivesh Dashboard", key="nav_parivesh"):
-                st.session_state.active_app = "parivesh"
-                st.rerun()
-        elif st.session_state.active_app == "parivesh":
-            if st.button("", icon=":material/layers:", help="Switch to MSTC Dashboard", key="nav_mstc"):
-                st.session_state.active_app = "mstc"
-                st.rerun()
+        if st.button("", icon=":material/layers:", help="MSTC Dashboard", key="nav_mstc"):
+            st.session_state.active_app = "mstc"
+            st.rerun()
     with c3:
+        if st.button("", icon=":material/eco:", help="Parivesh Dashboard", key="nav_parivesh"):
+            st.session_state.active_app = "parivesh"
+            st.rerun()
+    with c4:
+        if st.button("", icon=":material/gavel:", help="Bastar Court Dashboard", key="nav_bdc"):
+            st.session_state.active_app = "bdc"
+            st.rerun()
+    with c5:
         if st.button("", icon=":material/refresh:", help="Refresh Data", key="nav_refresh"):
             st.rerun()
 
@@ -235,6 +252,10 @@ elif st.session_state.active_app == "parivesh":
     from parivesh_auto.app import run_parivesh
     run_parivesh()
 
+elif st.session_state.active_app == "bdc":
+    from bdc_scrape.app import run_bdc
+    run_bdc()
+
 else:
     # ─── WEB AUTOMATIONS HUB ───
     st.markdown('<div class="main-title">Web Automations</div>', unsafe_allow_html=True)
@@ -244,7 +265,7 @@ else:
     st.write("") 
 
     # ─── PROJECT TILES ───
-    col1, col2 = st.columns(2, gap="large")
+    col1, col2, col3 = st.columns(3, gap="medium")
 
     with col1:
         st.markdown("""
@@ -270,6 +291,19 @@ else:
         """, unsafe_allow_html=True)
         if st.button("Launch Parivesh Portal", key="btn_parivesh", use_container_width=True):
             st.session_state.active_app = "parivesh"
+            st.rerun()
+
+    with col3:
+        st.markdown("""
+        <div class="project-card">
+            <div class="card-title">Bastar Court Cases</div>
+            <div class="card-body">
+                Case status and hearing monitoring for Bastar District Court NIA Annexure cases.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch BDC Portal", key="btn_bdc", use_container_width=True):
+            st.session_state.active_app = "bdc"
             st.rerun()
 
     # Footer

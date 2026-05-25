@@ -1,0 +1,39 @@
+name: Bastar Court Scraper Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run twice a month on the 1st and 15th at midnight UTC (Option A)
+    - cron: '0 0 1,15 * *'
+
+jobs:
+  scrape-and-sync:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Monorepo Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+
+      - name: Install Playwright Chromium Browser
+        run: playwright install --with-deps chromium
+
+      - name: Run Bastar Court Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }} # service_role secret key to bypass RLS
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: .
+        run: python projects/bdc_scrape/scraper.py

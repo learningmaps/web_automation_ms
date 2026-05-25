@@ -30,3 +30,4 @@ streamlit.log
 streamlit_output.log
 playwright_mcp/
 .playwright-mcp
+projects/bdc_scrape/temp_files/

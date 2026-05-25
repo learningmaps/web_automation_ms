@@ -28,6 +28,14 @@ graph TD
         DB --> MatView[Materialized View]
         MatView --> Parivesh_UI
     end
+
+    subgraph Bastar Court Project
+        Hub --> BDC_UI[Bastar Court Portal]
+        BDC_UI --> BDC_Sync[HTTP Scraper & Sync]
+        BDC_Sync --> Gemini_Captcha[Gemini CAPTCHA Solver]
+        BDC_Sync --> DB
+        DB --> BDC_UI
+    end
 ```
 
 ---
@@ -35,10 +43,11 @@ graph TD
 ## 2. User Interface Flow
 
 ### 2.1 Unified Hub (`main_app.py`)
-- **Entry Point**: The landing page displays high-level metrics (Total blocks, processed PDFs, keyword hits) fetched from both `mstc` and `parivesh` schemas.
-- **Navigation**: Two primary cards allow the user to launch specific project portals:
+- **Entry Point**: The landing page displays high-level metrics (Total blocks, processed PDFs, keyword hits, court cases) fetched from both `mstc`, `parivesh`, and `bdc` schemas.
+- **Navigation**: Three primary cards allow the user to launch specific project portals:
   - **MSTC Mineral Blocks**: Structured extraction from auction notices.
   - **Parivesh Monitoring**: Environmental clearance tracking.
+  - **Bastar Court Cases**: Case status monitoring for Bastar District Court.
 
 ### 2.2 MSTC Portal (`projects/mstc_py/app.py`)
 - **Metrics Bar**: Displays real-time counts of `Pending`, `Processed`, and `Failed` PDFs.
@@ -56,6 +65,14 @@ graph TD
   - **Refresh View**: Manually refreshes the PostgreSQL Materialized View for updated consolidation.
 - **Filters**: Advanced filtering by State, Committee Type, Keywords, and Date ranges.
 - **Data Table**: Displays a consolidated view of Agendas and Minutes of Meetings (MOM).
+
+### 2.4 Bastar Court Portal (`projects/bdc_scrape/app.py`)
+- **Metrics Bar**: Displays total cases, pending vs disposed, and latest sync timestamp.
+- **Controls**:
+  - **Fetch & Sync Cases**: Run the direct HTTP scraper to fetch case status records for configured case types and years.
+- **Data Views**:
+  - **Case List**: Displays a paginated, filterable table of court cases.
+  - **Case Details Viewer**: Detail view showing full dynamic case history, business/orders, and transfers.
 
 ---
 
@@ -95,6 +112,27 @@ graph TD
 
 ---
 
+## 4b. Data Flow: Bastar Court Cases (BDC Scrape)
+
+### Stage 1: Session Initiation & CAPTCHA Solving
+1. **Trigger**: Scraper starts (scheduled or manual button click).
+2. **HTTP GET**: Fetches the initial page to extract the `scid` token and dynamic token name/value.
+3. **CAPTCHA Download**: Fetches the CAPTCHA image using the same session. This sets the `PHPSESSID` cookie.
+4. **Gemini Solve**: Sends the CAPTCHA image to **Gemini 3.1 Flash-Lite** to extract the alphanumeric text.
+
+### Stage 2: Search Request & Dynamic Scraping
+1. **HTTP POST**: Submits the search parameters (case type, year, status, solved CAPTCHA text, and tokens) to the AJAX endpoint.
+2. **Parsing**: Parses the returned HTML table to extract the CNR number (`data-cno`) and establishment code (`data-est-code`) for each matching case.
+3. **HTTP Details POST**: Sequentially queries the AJAX details endpoint using the CNR number to fetch the complete HTML case details page (without needing CAPTCHA).
+
+### Stage 3: Database Storage
+1. **Extraction**: Parses details HTML into structured fields: Petitioner vs Respondent, Case Stage, Next Hearing Date, Business/Orders.
+2. **Supabase Sync**: Inserts or updates records in the `bdc.cases` and `bdc.case_history` tables.
+
+---
+
+---
+
 ## 5. Technical Infrastructure
 
 ### Database Schema (Supabase/PostgreSQL)
@@ -105,6 +143,9 @@ graph TD
 - **Schema `parivesh`**:
   - `agenda_v3`: Flat table containing metadata, keyword matches, and raw text.
   - `mv_consolidated_projects`: Materialized view for cross-referencing documents.
+- **Schema `bdc`**:
+  - `cases`: Main case details (CNR, Case Type, Case Year, Establishment Code, Petitioner, Respondent, Status, Next Hearing Date).
+  - `case_history`: Detailed logs of hearings, stages, and business history.
 
 ### Shared Logic
 - **`common/document_processing.py`**: Standardized PDF-to-Markdown conversion using the `markitdown` library.
@@ -112,12 +153,12 @@ graph TD
 
 ### External Integrations
 - **GitHub Actions**: Offloads heavy LLM processing tasks to GitHub's infrastructure to avoid Streamlit timeout limits.
-- **Google Gemini API**: Provides high-reasoning extraction capabilities with deterministic output (`temperature=0.0`).
+- **Google Gemini API**: Provides high-reasoning extraction capabilities with deterministic output (`temperature=0.0`) and solves scraper CAPTCHAs.
 
 ## 6. Security Architecture
 
 ### Row-Level Security (RLS)
-The Supabase database is secured using RLS on all tables in the `mstc` and `parivesh` schemas.
+The Supabase database is secured using RLS on all tables in the `mstc`, `parivesh`, and `bdc` schemas.
 - **Public Access**: Limited to `SELECT` operations only. This allows the Streamlit dashboards to display data without authentication while preventing unauthorized modifications.
 - **Backend Access**: Scrapers and GitHub Actions use the **`service_role`** secret key. This key bypasses RLS, allowing these trusted processes to `INSERT`, `UPDATE`, and `DELETE` records as needed.
 

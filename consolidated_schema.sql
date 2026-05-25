@@ -1,6 +1,7 @@
 -- ─── SCHEMA SETUP ───
 CREATE SCHEMA IF NOT EXISTS mstc;
 CREATE SCHEMA IF NOT EXISTS parivesh;
+CREATE SCHEMA IF NOT EXISTS bdc;
 
 -- ─── MSTC SCHEMA TABLES ───
 
@@ -112,3 +113,66 @@ CREATE POLICY "Public Read Access" ON mstc.mine_block_summaries FOR SELECT USING
 CREATE POLICY "Public Read Access" ON mstc.tenders_nit FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON mstc.tender_blocks FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON parivesh.agenda_v3 FOR SELECT USING (true);
+
+-- ─── BDC SCHEMA TABLES ───
+
+-- 1. Main Cases Table
+CREATE TABLE IF NOT EXISTS bdc.cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cnr TEXT UNIQUE NOT NULL,
+    establishment_code TEXT,
+    case_type TEXT,
+    case_year INT,
+    filing_no TEXT,
+    filing_date DATE,
+    reg_no TEXT,
+    reg_date DATE,
+    case_status TEXT, -- 'Pending' or 'Disposed'
+    first_hearing DATE,
+    next_hearing DATE,
+    stage TEXT,
+    court_name TEXT,
+    judge TEXT,
+    petitioners TEXT[],
+    petitioner_adv TEXT[],
+    respondents TEXT[],
+    respondent_adv TEXT[],
+    police_station TEXT,
+    fir_number TEXT,
+    fir_year TEXT,
+    acts_json JSONB,
+    page_pdf_url TEXT,
+    last_synced TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Case History Table (Proceedings & Hearings)
+CREATE TABLE IF NOT EXISTS bdc.case_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id UUID REFERENCES bdc.cases(id) ON DELETE CASCADE,
+    judge TEXT,
+    business_date DATE,
+    hearing_date DATE,
+    purpose TEXT,
+    business_text TEXT
+);
+
+-- 3. Case Orders Table (PDF interim/final orders)
+CREATE TABLE IF NOT EXISTS bdc.case_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id UUID REFERENCES bdc.cases(id) ON DELETE CASCADE,
+    order_date DATE,
+    order_type TEXT, -- 'interim' or 'final'
+    file_name TEXT,
+    storage_path TEXT,
+    pdf_url TEXT
+);
+
+-- Enable RLS for BDC tables
+ALTER TABLE bdc.cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bdc.case_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bdc.case_orders ENABLE ROW LEVEL SECURITY;
+
+-- Secure Policies for BDC tables
+CREATE POLICY "Public Read Access" ON bdc.cases FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON bdc.case_history FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON bdc.case_orders FOR SELECT USING (true);
