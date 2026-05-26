@@ -72,8 +72,8 @@ graph TD
   - **Sync**: Triggers the remote GitHub Actions scraper workflow asynchronously to fetch the latest cases.
   - **Refresh**: Reloads the dashboard data from Supabase immediately via a streamlit rerun.
 - **Data Views**:
-  - **Case List**: Displays a paginated, filterable table of court cases.
-  - **Case Details Viewer**: Detail view showing full dynamic case history, business/orders, and transfers.
+  - **Case List**: Displays a filterable table of court cases. Supports interactive row selection (`on_select="rerun"`) to dynamically load details of the selected case below.
+  - **Case Details Viewer**: Continuous vertical dossier docket showing overview, parties, acts & sections, FIR details, hearing history, and PDF order tables in stacked visual cards (enabling seamless page-level Ctrl+F text searches).
 
 ---
 

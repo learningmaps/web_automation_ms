@@ -62,15 +62,6 @@ def trigger_github_sync():
         return False
 
 def run_bdc():
-    # Stable tabs layout style to prevent page/screen jumping when switching tabs
-    st.markdown("""
-        <style>
-            [data-testid="stTabPanel"] {
-                min-height: 380px;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    
     # --- HEADER, STATS & CONTROLS ---
     # Fetch stats
     stats_data = run_query("SELECT case_status, last_synced FROM bdc.cases")
@@ -78,7 +69,7 @@ def run_bdc():
     
     total_cases = len(df_stats) if not df_stats.empty else 0
     total_pending = len(df_stats[df_stats['case_status'].str.lower() == 'pending']) if not df_stats.empty else 0
-    total_disposed = len(df_stats[df_stats['case_status'].str.lower() == 'disposed']) if not df_stats.empty else 0
+    total_disposed = len(df_stats[df_stats['case_status'].str.lower().str.contains('disposed')]) if not df_stats.empty else 0
     
     # Calculate last synced timestamp
     last_sync_str = "Never"
@@ -160,39 +151,81 @@ def run_bdc():
         
     # Display table list
     st.subheader(f"Cases List ({len(filtered_df)} matches)")
+    st.caption("Click on any case row to load its detailed docket overview below.")
     
     display_cols = ['cnr', 'case_type', 'reg_no', 'case_year', 'case_status', 'petitioners_str', 'respondents_str', 'next_hearing']
     display_df = filtered_df[display_cols].copy()
     display_df.columns = ['CNR Number', 'Case Type', 'Reg No', 'Year', 'Status', 'Petitioner(s)', 'Respondent(s)', 'Next Hearing']
     
-    st.dataframe(
+    event = st.dataframe(
         display_df,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row"
     )
     
-    # Case Details Selector
     st.divider()
-    st.subheader("Select Case for Detailed View")
     
-    case_options = {row['cnr']: f"{row['cnr']} - {row['petitioners_str']} vs {row['respondents_str']}" for _, row in filtered_df.iterrows()}
-    
-    if not case_options:
+    # Selection resolution
+    selected_cnr = None
+    if event and hasattr(event, "selection") and event.selection:
+        rows = getattr(event.selection, "rows", [])
+        if not rows and isinstance(event.selection, dict):
+            rows = event.selection.get("rows", [])
+        if rows:
+            selected_row_idx = rows[0]
+            selected_cnr = display_df.iloc[selected_row_idx]['CNR Number']
+            
+    # Default to first case if no explicit selection has been made
+    if not selected_cnr and not display_df.empty:
+        selected_cnr = display_df.iloc[0]['CNR Number']
+        
+    if not selected_cnr:
         st.info("No cases matching the filters to view details.")
         return
         
-    selected_cnr = st.selectbox(
-        "Select Case",
-        options=list(case_options.keys()),
-        format_func=lambda x: case_options[x],
-        label_visibility="collapsed"
-    )
+    case_info = filtered_df[filtered_df['cnr'] == selected_cnr].iloc[0]
+    case_uuid = case_info['id']
     
-    if selected_cnr:
-        case_info = filtered_df[filtered_df['cnr'] == selected_cnr].iloc[0]
-        case_uuid = case_info['id']
+    # 1. Main Title & Status Badge
+    badge_color = "#ff4b4b" if "pending" in case_info['case_status'].lower() else "#64748B"
+    st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 12px; margin-top: 15px; margin-bottom: 15px;">
+            <h3 style="margin: 0; padding: 0;">Case Details: {case_info['cnr']}</h3>
+            <span style="background-color: {badge_color}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; text-transform: uppercase;">
+                {case_info['case_status']}
+            </span>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # A4 PDF Download Button Link
+    if case_info['page_pdf_url']:
+        st.markdown(f"""
+            <div style="margin-top: 5px; margin-bottom: 25px;">
+                <a href="{case_info['page_pdf_url']}" target="_blank" style="
+                    display: inline-block;
+                    padding: 10px 20px;
+                    background-color: white;
+                    color: #0F172A;
+                    border: 1px solid #ff4b4b;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    text-decoration: none;
+                    transition: all 0.2s ease;
+                    text-align: center;
+                " onmouseover="this.style.backgroundColor='#ff4b4b'; this.style.color='white';" onmouseout="this.style.backgroundColor='white'; this.style.color='#0F172A';">
+                    Download Full Case Page PDF (A4)
+                </a>
+            </div>
+        """, unsafe_allow_html=True)
         
-        # 1. Main Info Panels
+    # 2. Continuous Stacked Dossier Card Panels
+    
+    # Overview Panel
+    with st.container(border=True):
+        st.markdown("#### Overview")
         detail_col1, detail_col2 = st.columns(2)
         with detail_col1:
             st.markdown(f"**CNR Number:** `{case_info['cnr']}`")
@@ -209,83 +242,89 @@ def run_bdc():
             st.markdown(f"**Next Hearing Date:** {case_info['next_hearing']}")
             st.markdown(f"**First Hearing Date:** {case_info['first_hearing']}")
             
-        # PDF Case Printout Button
-        if case_info['page_pdf_url']:
-            st.markdown(f"[Download Full Case Page PDF (A4)]({case_info['page_pdf_url']})")
-            
-        # 2. Tabs for Parties, Acts, FIR, History, Orders
-        tab_parties, tab_acts, tab_fir, tab_history, tab_orders = st.tabs([
-            "Parties & Representation", "Acts & Sections", "FIR Details", "Hearing History", "PDF Orders"
-        ])
-        
-        with tab_parties:
-            p_col1, p_col2 = st.columns(2)
-            with p_col1:
-                st.write("**Petitioners**")
-                for pet in case_info['petitioners']:
-                    st.write(f"- {pet}")
-                st.write("**Advocate(s):**")
-                for adv in case_info['petitioner_adv']:
-                    st.write(f"- {adv}")
-            with p_col2:
-                st.write("**Respondents**")
-                for res in case_info['respondents']:
-                    st.write(f"- {res}")
-                st.write("**Advocate(s):**")
-                for adv in case_info['respondent_adv']:
-                    st.write(f"- {adv}")
-                    
-        with tab_acts:
+    st.write("") # Vertical spacing
+
+    # Parties & Representation Panel
+    with st.container(border=True):
+        st.markdown("#### Parties & Representation")
+        p_col1, p_col2 = st.columns(2)
+        with p_col1:
+            st.markdown("**Petitioners**")
+            for pet in case_info['petitioners']:
+                st.markdown(f"- {pet}")
+            st.markdown("**Advocate(s):**")
+            for adv in case_info['petitioner_adv']:
+                st.markdown(f"- {adv}")
+        with p_col2:
+            st.markdown("**Respondents**")
+            for res in case_info['respondents']:
+                st.markdown(f"- {res}")
+            st.markdown("**Advocate(s):**")
+            for adv in case_info['respondent_adv']:
+                st.markdown(f"- {adv}")
+                
+    st.write("") # Vertical spacing
+
+    # Acts & FIR Details Panel
+    with st.container(border=True):
+        st.markdown("#### Acts & FIR Details")
+        act_col, fir_col = st.columns(2)
+        with act_col:
+            st.markdown("**Acts & Sections**")
             acts_list = case_info['acts_json']
             if acts_list:
                 df_acts = pd.DataFrame(acts_list)
                 df_acts.columns = ['Act Name', 'Section(s)']
-                st.dataframe(df_acts, height=300, use_container_width=True, hide_index=True)
+                st.dataframe(df_acts, use_container_width=True, hide_index=True)
             else:
                 st.info("No acts or sections recorded.")
-                
-        with tab_fir:
+        with fir_col:
+            st.markdown("**FIR Details**")
             st.markdown(f"**Police Station:** {case_info['police_station']}")
             st.markdown(f"**FIR Number:** {case_info['fir_number']}")
             st.markdown(f"**FIR Year:** {case_info['fir_year']}")
             
-        with tab_history:
-            history_data = run_query(
-                "SELECT business_date, hearing_date, purpose, judge, business_text FROM bdc.case_history WHERE case_id = %s ORDER BY business_date DESC",
-                (case_uuid,)
+    st.write("") # Vertical spacing
+
+    # Hearing History Panel
+    with st.container(border=True):
+        st.markdown("#### Hearing History")
+        history_data = run_query(
+            "SELECT business_date, hearing_date, purpose, judge, business_text FROM bdc.case_history WHERE case_id = %s ORDER BY business_date DESC",
+            (case_uuid,)
+        )
+        if history_data:
+            df_hist = pd.DataFrame(history_data)
+            df_hist_display = df_hist[['business_date', 'hearing_date', 'purpose', 'judge', 'business_text']].copy()
+            df_hist_display.columns = ['Business Date', 'Next Hearing Date', 'Purpose of Hearing', 'Presiding Judge', 'Proceedings Text']
+            st.dataframe(df_hist_display, height=250, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hearing history recorded.")
+            
+    st.write("") # Vertical spacing
+
+    # PDF Orders Panel
+    with st.container(border=True):
+        st.markdown("#### PDF Orders")
+        orders_data = run_query(
+            "SELECT order_date, order_type, file_name, pdf_url FROM bdc.case_orders WHERE case_id = %s ORDER BY order_date DESC",
+            (case_uuid,)
+        )
+        if orders_data:
+            df_orders = pd.DataFrame(orders_data)
+            df_orders_display = df_orders[['order_date', 'order_type', 'file_name', 'pdf_url']].copy()
+            df_orders_display.columns = ['Order Date', 'Type', 'File Name', 'Download Link']
+            st.dataframe(
+                df_orders_display,
+                height=200,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Download Link": st.column_config.LinkColumn("Download Link")
+                }
             )
-            if history_data:
-                df_hist = pd.DataFrame(history_data)
-                
-                # Format table
-                df_hist_display = df_hist[['business_date', 'hearing_date', 'purpose', 'judge', 'business_text']].copy()
-                df_hist_display.columns = ['Business Date', 'Next Hearing Date', 'Purpose of Hearing', 'Presiding Judge', 'Proceedings Text']
-                
-                st.dataframe(df_hist_display, height=300, use_container_width=True, hide_index=True)
-            else:
-                st.info("No hearing history recorded.")
-                
-        with tab_orders:
-            orders_data = run_query(
-                "SELECT order_date, order_type, file_name, pdf_url FROM bdc.case_orders WHERE case_id = %s ORDER BY order_date DESC",
-                (case_uuid,)
-            )
-            if orders_data:
-                df_orders = pd.DataFrame(orders_data)
-                df_orders_display = df_orders[['order_date', 'order_type', 'file_name', 'pdf_url']].copy()
-                df_orders_display.columns = ['Order Date', 'Type', 'File Name', 'Download Link']
-                
-                st.dataframe(
-                    df_orders_display,
-                    height=300,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Download Link": st.column_config.LinkColumn("Download Link")
-                    }
-                )
-            else:
-                st.info("No order PDF documents uploaded for this case.")
+        else:
+            st.info("No order PDF documents uploaded for this case.")
 
 if __name__ == "__main__":
     run_bdc()
