@@ -127,6 +127,7 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 2. **HTTP GET**: Fetches the initial search page via the SQL proxy to extract form tokens (`scid`, `tok_*`).
 3. **CAPTCHA Download**: Downloads the CAPTCHA image via the SQL proxy (retaining session cookies in python memory).
 4. **Gemini Solve**: Sends the CAPTCHA image data to **Gemini 3.1 Flash-Lite** to solve the text.
+5. **Retry Loop**: If verification fails due to an incorrect CAPTCHA code, the scraper re-downloads and re-solves only the CAPTCHA image. It reuses the original search tokens and PHP session cookie, completely bypassing any base page reload.
 
 ### Stage 3: Search Request & Dynamic Scraping
 1. **HTTP POST**: Submits case search parameters (case type, year, status, solved CAPTCHA text, tokens) to the AJAX search endpoint via the SQL proxy.

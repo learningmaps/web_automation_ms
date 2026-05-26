@@ -236,45 +236,46 @@ def fetch_search_results(session, year, status):
     Initiates session, downloads captcha, solves it, and posts search form.
     Retries up to 3 times in case of captcha failure.
     """
+    print(f"Scraping Year {year} ({status})...")
+    
+    # 1. GET main page ONCE to retrieve cookies and extract form tokens
+    resp = session.get(BASE_URL, headers=HEADERS, timeout=20)
+    if resp.status_code != 200:
+        print(f"  Error: Failed to load main page. Status: {resp.status_code}")
+        return None
+        
+    soup = BeautifulSoup(resp.text, 'lxml')
+    
+    # Parse tokens
+    scid_input = soup.find('input', {'name': 'scid'})
+    tok_input = soup.find('input', {'name': lambda s: s and s.startswith('tok_')})
+    
+    if not scid_input or not tok_input:
+        print("  Error: Missing form tokens in page HTML.")
+        return None
+        
+    scid_val = scid_input.get('value')
+    tok_name = tok_input.get('name')
+    tok_val = tok_input.get('value')
+    
+    # Get CAPTCHA image element and URL
+    captcha_img = soup.find('img', {'id': 'siwp_captcha_image_0'}) or soup.find('img', src=lambda s: s and 'captcha' in s.lower())
+    if not captcha_img:
+        print("  Error: Captcha image element not found.")
+        return None
+        
+    captcha_src = captcha_img.get('src')
+    if not captcha_src.startswith('http'):
+        captcha_url = "https://bastar.dcourts.gov.in" + (captcha_src if captcha_src.startswith('/') else "/" + captcha_src)
+    else:
+        captcha_url = captcha_src
+        
+    # 2. Retry loop for CAPTCHA solving and form submission
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
-        print(f"Scraping Year {year} ({status}) - Attempt {attempt}/{max_attempts}...")
+        print(f"  Attempt {attempt}/{max_attempts} solving CAPTCHA...")
         
-        # 1. GET main page
-        resp = session.get(BASE_URL, headers=HEADERS, timeout=20)
-        if resp.status_code != 200:
-            print(f"  Error: Failed to load main page. Status: {resp.status_code}")
-            time.sleep(2)
-            continue
-            
-        soup = BeautifulSoup(resp.text, 'lxml')
-        
-        # Parse tokens
-        scid_input = soup.find('input', {'name': 'scid'})
-        tok_input = soup.find('input', {'name': lambda s: s and s.startswith('tok_')})
-        
-        if not scid_input or not tok_input:
-            print("  Error: Missing form tokens in page HTML.")
-            time.sleep(2)
-            continue
-            
-        scid_val = scid_input.get('value')
-        tok_name = tok_input.get('name')
-        tok_val = tok_input.get('value')
-        
-        # 2. Get CAPTCHA image and download
-        captcha_img = soup.find('img', {'id': 'siwp_captcha_image_0'}) or soup.find('img', src=lambda s: s and 'captcha' in s.lower())
-        if not captcha_img:
-            print("  Error: Captcha image element not found.")
-            time.sleep(2)
-            continue
-            
-        captcha_src = captcha_img.get('src')
-        if not captcha_src.startswith('http'):
-            captcha_url = "https://bastar.dcourts.gov.in" + (captcha_src if captcha_src.startswith('/') else "/" + captcha_src)
-        else:
-            captcha_url = captcha_src
-            
+        # Download the CAPTCHA image (updates verification challenge on PHP session)
         captcha_resp = session.get(captcha_url, headers=HEADERS, timeout=15)
         if captcha_resp.status_code != 200:
             print("  Error: Failed to download Captcha image.")
@@ -285,14 +286,14 @@ def fetch_search_results(session, year, status):
         with open(captcha_path, "wb") as f:
             f.write(captcha_resp.content)
             
-        # 3. Solve CAPTCHA
+        # Solve the CAPTCHA via Gemini API
         try:
             captcha_code = solve_captcha(captcha_path)
         except Exception as e:
             print(f"  Error solving captcha: {e}")
             continue
             
-        # 4. POST search request
+        # POST search request
         payload = {
             "service_type": "courtComplex",
             "est_code": COURT_COMPLEX_CODE,
@@ -322,6 +323,7 @@ def fetch_search_results(session, year, status):
                 print(f"  Search returned failure status: {msg}")
                 if "captcha" in msg.lower():
                     print("  Retrying due to incorrect CAPTCHA code...")
+                    time.sleep(1) # Slight pause before re-downloading captcha
                     continue
                 return None
                 
