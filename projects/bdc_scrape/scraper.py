@@ -662,23 +662,15 @@ def sync(progress_callback=None, max_cases=None):
             case_data["case_year"] = int(year)
             case_data["details_html"] = details_html
             
-            # Fetch detailed business text for the history rows
-            # We limit to the last 5 rows to be polite and save time, or fetch all if small.
-            # In our case, the history rows are short, so let's fetch all.
+            # Build history rows without downloading Business On Date PDFs
             processed_history = []
             for h_row in history_rows:
-                bus_text = ""
-                if h_row["raw_meta"]:
-                    # Polite delay
-                    time.sleep(0.5)
-                    bus_text = fetch_business_text(session, h_row["raw_meta"])
-                
                 processed_history.append({
                     "judge": h_row["judge"],
                     "business_date": h_row["business_date"],
                     "hearing_date": h_row["hearing_date"],
                     "purpose": h_row["purpose"],
-                    "business_text": bus_text
+                    "business_text": ""
                 })
                 
             # Upload dynamic Order PDFs if present
