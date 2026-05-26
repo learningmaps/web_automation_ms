@@ -66,7 +66,7 @@ st.markdown("""
         border-radius: 12px;
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
-        min-height: 140px;
+        height: 150px;
         transition: all 0.2s ease;
     }
     .project-card:hover {
