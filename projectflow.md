@@ -166,6 +166,9 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 - **GitHub Actions**: Offloads heavy LLM processing tasks to GitHub's infrastructure to avoid Streamlit timeout limits.
 - **Google Gemini API**: Provides high-reasoning extraction capabilities with deterministic output (`temperature=0.0`) and solves scraper CAPTCHAs.
 
+### Verification Utilities
+- **`supabase/functions/test-waf`**: A utility Edge Function designed to test direct HTTP requests from Supabase cloud environments to the Bastar Court website to verify WAF geoblocking behaviour.
+
 ## 6. Security Architecture
 
 ### Row-Level Security (RLS)
