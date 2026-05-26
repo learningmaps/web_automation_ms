@@ -123,23 +123,45 @@ def run_bdc():
     
     # --- FILTERS ---
     st.subheader("Filter Cases")
-    f_col1, f_col2, f_col3 = st.columns(3)
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
     with f_col1:
         years = sorted(df_cases['case_year'].dropna().unique().tolist(), reverse=True)
         selected_years = st.multiselect("Case Year", years, default=years)
         
     with f_col2:
+        case_types = sorted(df_cases['case_type'].dropna().unique().tolist())
+        selected_types = st.multiselect("Case Type", case_types, default=case_types)
+        
+    with f_col3:
         statuses = sorted(df_cases['case_status'].dropna().unique().tolist())
         selected_statuses = st.multiselect("Status", statuses, default=statuses)
         
-    with f_col3:
+    with f_col4:
         search_query = st.text_input("Search (CNR, Petitioner, Respondent)", "").strip().lower()
-        
+
+    # Next Hearing Date Range filter
+    st.write("") # spacing
+    enable_date_filter = st.checkbox("Filter by Next Hearing Date", value=False)
+    if enable_date_filter:
+        dates = pd.to_datetime(df_cases['next_hearing']).dropna()
+        if not dates.empty:
+            min_date, max_date = dates.min().date(), dates.max().date()
+        else:
+            from datetime import date
+            min_date, max_date = date.today(), date.today()
+        if min_date > max_date:
+            min_date, max_date = max_date, min_date
+        date_range = st.date_input("Next Hearing Date Range", [min_date, max_date])
+    else:
+        date_range = None
+            
     # Apply filters
     filtered_df = df_cases
     if selected_years:
         filtered_df = filtered_df[filtered_df['case_year'].isin(selected_years)]
+    if selected_types:
+        filtered_df = filtered_df[filtered_df['case_type'].isin(selected_types)]
     if selected_statuses:
         filtered_df = filtered_df[filtered_df['case_status'].isin(selected_statuses)]
     if search_query:
@@ -147,6 +169,13 @@ def run_bdc():
             filtered_df['cnr'].str.lower().str.contains(search_query) |
             filtered_df['petitioners_str'].str.lower().str.contains(search_query) |
             filtered_df['respondents_str'].str.lower().str.contains(search_query)
+        ]
+    if enable_date_filter and date_range and len(date_range) == 2:
+        start_date, end_date = date_range
+        filtered_df = filtered_df[
+            filtered_df['next_hearing'].notna() &
+            (pd.to_datetime(filtered_df['next_hearing']).dt.date >= start_date) &
+            (pd.to_datetime(filtered_df['next_hearing']).dt.date <= end_date)
         ]
         
     # Display table list
