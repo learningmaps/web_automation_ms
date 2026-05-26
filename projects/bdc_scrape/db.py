@@ -32,7 +32,11 @@ def get_db_connection():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise ValueError("DATABASE_URL not found in environment variables")
-    return psycopg2.connect(db_url)
+    # Use Transaction Pooler port (6543) and add sslmode/connect_timeout
+    base_url = db_url.replace(":5432/", ":6543/")
+    sep = "&" if "?" in base_url else "?"
+    db_url_final = f"{base_url}{sep}sslmode=require&connect_timeout=15"
+    return psycopg2.connect(db_url_final)
 
 def upload_pdf_to_storage(local_path: str, storage_path: str) -> str:
     """

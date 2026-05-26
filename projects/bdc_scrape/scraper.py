@@ -8,6 +8,142 @@ from bs4 import BeautifulSoup
 from PIL import Image
 import google.generativeai as genai
 from datetime import datetime
+from requests.models import Response
+from requests.structures import CaseInsensitiveDict
+from requests.cookies import cookiejar_from_dict
+import urllib.parse
+import psycopg2
+
+# Custom database HTTP session proxy:
+class SupabaseSQLSession:
+    def __init__(self, db_url):
+        base_url = db_url.replace(":5432/", ":6543/")
+        sep = "&" if "?" in base_url else "?"
+        self.db_url = f"{base_url}{sep}sslmode=require&connect_timeout=15"
+        self.cookies = {}
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+    def request(self, method, url, params=None, data=None, headers=None, json=None, timeout=None, verify=None):
+        start_time = time.time()
+        # 1. Merge headers
+        req_headers = self.headers.copy()
+        if headers:
+            req_headers.update(headers)
+            
+        # 2. Handle cookies in headers
+        if self.cookies:
+            cookie_str = "; ".join([f"{k}={v}" for k, v in self.cookies.items()])
+            req_headers["Cookie"] = cookie_str
+            
+        # 3. Handle query params in URL
+        if params:
+            url = url + ("?" if "?" not in url else "&") + urllib.parse.urlencode(params)
+            
+        # 4. Handle JSON vs Form data
+        content_type = "application/x-www-form-urlencoded"
+        body_content = ""
+        if json is not None:
+            import json as json_lib
+            body_content = json_lib.dumps(json)
+            content_type = "application/json"
+        elif data is not None:
+            if isinstance(data, dict):
+                body_content = urllib.parse.urlencode(data)
+            else:
+                body_content = str(data)
+        if content_type:
+            req_headers["Content-Type"] = content_type
+
+        # 5. Connect to database and execute http request
+        try:
+            conn = psycopg2.connect(self.db_url)
+            conn.autocommit = True
+            cur = conn.cursor()
+        except Exception as conn_err:
+            print(f"  [SQL Proxy] Database connection failed: {conn_err}")
+            raise conn_err
+        
+        try:
+            # Set statement and HTTP timeouts to avoid hanging indefinitely
+            try:
+                cur.execute("SET statement_timeout = 25000;")
+                cur.execute("SET http.timeout_msec = 20000;")
+            except Exception as set_err:
+                print(f"  [SQL Proxy] Warning: Failed to set query timeouts: {set_err}")
+                
+            # Construct array of http_header composite types
+            header_elements = []
+            for k, v in req_headers.items():
+                k_esc = k.replace("'", "''")
+                v_esc = v.replace("'", "''")
+                header_elements.append(f"row('{k_esc}', '{v_esc}')::http_header")
+            
+            headers_array_sql = f"ARRAY[{', '.join(header_elements)}]" if header_elements else "ARRAY[]::http_header[]"
+            body_esc = body_content.replace("'", "''")
+            
+            sql = f"""
+                SELECT status, headers, textsend(content)
+                FROM http((
+                    '{method.upper()}', 
+                    '{url}', 
+                    {headers_array_sql}, 
+                    '{content_type}', 
+                    '{body_esc}'
+                )::http_request);
+            """
+            
+            cur.execute(sql)
+            status, resp_headers_raw, content_bytes_mv = cur.fetchone()
+            
+            content_bytes = content_bytes_mv.tobytes() if hasattr(content_bytes_mv, 'tobytes') else content_bytes_mv
+            if isinstance(content_bytes, str):
+                content_bytes = content_bytes.encode('utf-8')
+                
+        except Exception as e:
+            print(f"  [SQL Proxy] HTTP request execution failed: {e}")
+            raise e
+        finally:
+            cur.close()
+            conn.close()
+
+        # 6. Parse response headers and cookies
+        resp_headers = {}
+        if resp_headers_raw:
+            for item in resp_headers_raw:
+                item_str = item.strip("()")
+                if "," in item_str:
+                    k, v = item_str.split(",", 1)
+                    k_clean = k.strip('"').replace('\\"', '"')
+                    v_clean = v.strip('"').replace('\\"', '"')
+                    resp_headers[k_clean] = v_clean
+                    
+                    if k_clean.lower() == "set-cookie":
+                        cookie_match = re.match(r"([^=]+)=([^;]+)", v_clean)
+                        if cookie_match:
+                            ck, cv = cookie_match.groups()
+                            self.cookies[ck.strip()] = cv.strip()
+
+        # 7. Create mock Response
+        response = Response()
+        response.status_code = status
+        response.headers = CaseInsensitiveDict(resp_headers)
+        response._content = content_bytes
+        response.cookies = cookiejar_from_dict(self.cookies)
+        response.url = url
+        
+        elapsed = time.time() - start_time
+        print(f"  [SQL Proxy] {method} {url} -> {status} ({len(content_bytes)} bytes) in {elapsed:.2f}s")
+        return response
+
+    def get(self, url, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url, **kwargs):
+        return self.request("POST", url, **kwargs)
 
 # Import project components
 from projects.bdc_scrape.constants import (
@@ -404,9 +540,11 @@ def generate_pdf_printout(html_content, output_path):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
+        # Abort requests to bastar.dcourts.gov.in to avoid geoblocking timeouts
+        page.route("**/*", lambda route: route.abort() if "bastar.dcourts.gov.in" in route.request.url else route.continue_())
         page.set_content(html_content)
         # Wait for resources to load
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("load")
         # Generate A4 PDF with background colors preserved
         page.pdf(path=output_path, format="A4", print_background=True)
         browser.close()
@@ -416,7 +554,22 @@ def sync(progress_callback=None, max_cases=None):
     Main orchestrator that runs the entire sync job.
     """
     print("--- STARTING BASTAR COURT CASES SYNC ---")
-    session = requests.Session()
+    db_url_india = os.getenv("DATABASE_URL_INDIA") or os.getenv("PROXY_DATABASE_URL")
+    proxy_url = os.getenv("PROXY_URL")
+    
+    if db_url_india:
+        print("Routing HTTP requests through Supabase India database proxy...")
+        session = SupabaseSQLSession(db_url_india)
+    elif proxy_url:
+        print("Routing HTTP requests through proxy server...")
+        session = requests.Session()
+        session.proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+    else:
+        print("Routing HTTP requests directly...")
+        session = requests.Session()
     
     scraped_cases = []
     
@@ -566,7 +719,6 @@ def sync(progress_callback=None, max_cases=None):
             styled_html = f"""
             <html>
             <head>
-                <link rel="stylesheet" href="https://bastar.dcourts.gov.in/wp-content/themes/sdo-theme/css/base.css" type="text/css" />
                 <style>
                     body {{ padding: 20px; font-family: sans-serif; }}
                     .distTableContent {{ margin-bottom: 20px; }}

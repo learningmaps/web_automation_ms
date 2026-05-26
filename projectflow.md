@@ -115,20 +115,29 @@ graph TD
 
 ## 4b. Data Flow: Bastar Court Cases (BDC Scrape)
 
-### Stage 1: Session Initiation & CAPTCHA Solving
+### Stage 1: Geoblocking Bypass & HTTP Proxying
+To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud services and public proxies, all scraper HTTP requests are routed through a trusted Indian database server:
+1. **Supabase SQL Session (`SupabaseSQLSession`)**: A drop-in custom `requests`-compatible session class.
+2. **PostgreSQL Proxy Relay**: Outgoing GET/POST requests are serialized and executed inside PostgreSQL on an AWS Mumbai (`ap-south-1`) instance using the `http` extension.
+3. **Binary Handling**: CAPTCHA images and order PDFs are downloaded as binary data through PostgreSQL using `textsend(content)` to prevent null-byte truncation.
+4. **Timeouts**: Safe database query connection and execution timeouts (`statement_timeout`, `http.timeout_msec`) prevent hanging on network latency.
+
+### Stage 2: Session Initiation & CAPTCHA Solving
 1. **Trigger**: Scraper starts (scheduled or manual button click).
-2. **HTTP GET**: Fetches the initial page to extract the `scid` token and dynamic token name/value.
-3. **CAPTCHA Download**: Fetches the CAPTCHA image using the same session. This sets the `PHPSESSID` cookie.
-4. **Gemini Solve**: Sends the CAPTCHA image to **Gemini 3.1 Flash-Lite** to extract the alphanumeric text.
+2. **HTTP GET**: Fetches the initial search page via the SQL proxy to extract form tokens (`scid`, `tok_*`).
+3. **CAPTCHA Download**: Downloads the CAPTCHA image via the SQL proxy (retaining session cookies in python memory).
+4. **Gemini Solve**: Sends the CAPTCHA image data to **Gemini 3.1 Flash-Lite** to solve the text.
 
-### Stage 2: Search Request & Dynamic Scraping
-1. **HTTP POST**: Submits the search parameters (case type, year, status, solved CAPTCHA text, and tokens) to the AJAX endpoint.
-2. **Parsing**: Parses the returned HTML table to extract the CNR number (`data-cno`) and establishment code (`data-est-code`) for each matching case.
-3. **HTTP Details POST**: Sequentially queries the AJAX details endpoint using the CNR number to fetch the complete HTML case details page (without needing CAPTCHA).
+### Stage 3: Search Request & Dynamic Scraping
+1. **HTTP POST**: Submits case search parameters (case type, year, status, solved CAPTCHA text, tokens) to the AJAX search endpoint via the SQL proxy.
+2. **Parsing**: Parses the returned HTML to identify CNR numbers (`data-cno`) and establishment codes (`data-est-code`).
+3. **HTTP Details POST**: Sequentially queries the details AJAX endpoint via the SQL proxy to fetch the HTML content of each case.
+4. **Order PDF Sync**: Downloads case order PDFs through the SQL proxy and uploads them to Supabase Storage.
+5. **Print Layout PDF**: Headless Playwright renders the HTML locally to generate an A4 details PDF. To avoid timeouts from external blocked court assets, the generator blocks requests to `bastar.dcourts.gov.in` and uses inlined styles.
 
-### Stage 3: Database Storage
-1. **Extraction**: Parses details HTML into structured fields: Petitioner vs Respondent, Case Stage, Next Hearing Date, Business/Orders.
-2. **Supabase Sync**: Inserts or updates records in the `bdc.cases` and `bdc.case_history` tables.
+### Stage 4: Database Storage
+1. **Extraction**: Parses details HTML into structured tables: Case Details, Status, Petitioners, Respondents, Acts, and Hearing History.
+2. **Supabase Sync**: Inserts or updates records in `bdc.cases`, `bdc.case_history`, and `bdc.case_orders` schemas.
 
 ---
 
