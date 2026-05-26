@@ -538,12 +538,16 @@ def generate_pdf_printout(html_content, output_path):
     Uses headless Playwright to load the HTML locally and print to a PDF.
     """
     from playwright.sync_api import sync_playwright
+    import os
     # Wrap in standard Playwright context
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         # Abort requests to bastar.dcourts.gov.in to avoid geoblocking timeouts
         page.route("**/*", lambda route: route.abort() if "bastar.dcourts.gov.in" in route.request.url else route.continue_())
+        # Emulate screen media to apply background-colors and styles from screen stylesheet
+        page.emulate_media(media="screen")
+        # Load the HTML content
         page.set_content(html_content)
         # Wait for resources to load
         page.wait_for_load_state("load")
@@ -737,24 +741,44 @@ def sync(progress_callback=None, max_cases=None):
             # Generate Case Page printout PDF locally
             page_pdf_name = f"case_details_{cno}.pdf"
             page_pdf_path = f"{TEMP_DIR}/{page_pdf_name}"
-            # Render a styled HTML wrapping details_html
-            styled_html = f"""
-            <html>
-            <head>
-                <style>
-                    body {{ padding: 20px; font-family: sans-serif; }}
-                    .distTableContent {{ margin-bottom: 20px; }}
-                    table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; }}
-                    th, td {{ border: 1px solid #ccc; padding: 8px; text-align: left; }}
-                    th {{ background-color: #f2f2f2; }}
-                    {css_content}
-                </style>
-            </head>
-            <body>
-                {details_html}
-            </body>
-            </html>
-            """
+            
+            # Load page template
+            template_path = "projects/bdc_scrape/page_template.html"
+            styled_html = ""
+            if os.path.exists(template_path):
+                try:
+                    with open(template_path, "r", encoding="utf-8") as temp_f:
+                        template_content = temp_f.read()
+                    
+                    # Inject base href dynamically to resolve local file paths
+                    base_href = f'<base href="file://{os.path.abspath(os.getcwd())}/">'
+                    template_content = template_content.replace("<head>", f"<head>\n    {base_href}")
+                    
+                    # Inject CSS and dynamic details HTML into template placeholders
+                    styled_html = template_content.replace("/* COURT_STYLES_PLACEHOLDER */", css_content)
+                    styled_html = styled_html.replace("<!-- CASE_DETAILS_PLACEHOLDER -->", details_html)
+                except Exception as temp_err:
+                    print(f"  Warning: Failed to read page template: {temp_err}")
+            
+            # Fallback if template loading failed
+            if not styled_html:
+                styled_html = f"""
+                <html>
+                <head>
+                    <style>
+                        body {{ padding: 20px; font-family: sans-serif; }}
+                        .distTableContent {{ margin-bottom: 20px; }}
+                        table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; }}
+                        th, td {{ border: 1px solid #ccc; padding: 8px; text-align: left; }}
+                        th {{ background-color: #f2f2f2; }}
+                        {css_content}
+                    </style>
+                </head>
+                <body>
+                    {details_html}
+                </body>
+                </html>
+                """
             
             print(f"  Generating print layout PDF using Playwright...")
             generate_pdf_printout(styled_html, page_pdf_path)

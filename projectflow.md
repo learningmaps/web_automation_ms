@@ -134,7 +134,11 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 2. **Parsing**: Parses the returned HTML to identify CNR numbers (`data-cno`) and establishment codes (`data-est-code`).
 3. **HTTP Details POST**: Sequentially queries the details AJAX endpoint via the SQL proxy to fetch the HTML content of each case.
 4. **Order PDF Sync**: Checks existing records in `bdc.case_orders` for the given CNR. For each order in the current case, if it was already synced (matching order date), the scraper reuses the S3 URL. Only new/unsynced orders are downloaded through the SQL proxy and uploaded to Supabase Storage, dramatically reducing execution time and proxy overhead.
-5. **Print Layout PDF**: Headless Playwright renders the HTML locally to generate an A4 details PDF. To avoid timeouts and layout breakage from geoblocked external styles/assets, the generator blocks requests to `bastar.dcourts.gov.in` and injects pre-downloaded court styles from `court_styles.css` directly into the document.
+5. **Print Layout PDF**: Headless Playwright renders the HTML locally to generate an A4 details PDF. To bypass WAF geoblocking of styles and image assets (national emblem, logos, etc.), the generator:
+    - Loads a static website template `page_template.html` (constructed from the court's outer page skeleton).
+    - Injects the compiled stylesheet (`court_styles.css`) and dynamic case HTML (`details_html`) into placeholders.
+    - Dynamically injects a `<base>` tag (pointing to the workspace root) so the browser loads pre-downloaded local logo assets (`projects/bdc_scrape/assets/`).
+    - Emulates `screen` media query (`emulate_media(media="screen")`) in Playwright before printing, ensuring all card borders, backgrounds, colors, and layout widths render exactly like the live website view.
 
 ### Stage 4: Database Storage
 1. **Extraction**: Parses details HTML into structured tables: Case Details, Status, Petitioners, Respondents, Acts, and Hearing History.
