@@ -201,3 +201,34 @@ def sync_case_orders(case_id: str, orders_list: list):
     finally:
         cur.close()
         conn.close()
+
+def get_existing_case_orders(cnr: str) -> dict:
+    """
+    Queries the database for existing synced orders associated with the CNR number.
+    Returns a dictionary of {order_date_str: pdf_url}.
+    """
+    if not cnr:
+        return {}
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    query = """
+    SELECT co.order_date, co.pdf_url 
+    FROM bdc.case_orders co
+    JOIN bdc.cases c ON co.case_id = c.id
+    WHERE c.cnr = %s;
+    """
+    
+    try:
+        cur.execute(query, (cnr,))
+        rows = cur.fetchall()
+        # Return dict matching order_date string format (YYYY-MM-DD)
+        return {row[0].strftime("%Y-%m-%d") if hasattr(row[0], "strftime") else str(row[0]): row[1] for row in rows}
+    except Exception as e:
+        print(f"  Warning: Failed to fetch existing orders from database: {e}")
+        return {}
+    finally:
+        cur.close()
+        conn.close()
+

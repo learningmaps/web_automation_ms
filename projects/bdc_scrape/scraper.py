@@ -152,7 +152,7 @@ from projects.bdc_scrape.constants import (
 )
 from projects.bdc_scrape.db import (
     get_supabase, upload_pdf_to_storage, upsert_case,
-    sync_case_history, sync_case_orders
+    sync_case_history, sync_case_orders, get_existing_case_orders
 )
 
 TEMP_DIR = "projects/bdc_scrape/temp_files"
@@ -675,21 +675,39 @@ def sync(progress_callback=None, max_cases=None):
                     "business_text": ""
                 })
                 
+            # Query existing synced orders to avoid redundant downloads
+            existing_orders = get_existing_case_orders(cno)
+
             # Upload dynamic Order PDFs if present
             processed_orders = []
             for order in orders_list:
+                order_date_str = order["order_date"]
+                local_pdf_name = f"order_{cno}_{order_date_str}.pdf"
+                s3_path = f"bdc/cases/{year}/{status}/{cno}/orders/{order_date_str}.pdf"
+                
+                # Check if this order is already synced
+                if order_date_str in existing_orders:
+                    s3_public_url = existing_orders[order_date_str]
+                    print(f"  Order for date {order_date_str} already synced. Reusing S3 URL: {s3_public_url}")
+                    processed_orders.append({
+                        "order_date": order_date_str,
+                        "order_type": order["order_type"],
+                        "file_name": local_pdf_name,
+                        "storage_path": s3_path,
+                        "pdf_url": s3_public_url
+                    })
+                    continue
+                
                 pdf_url = order["pdf_url"]
                 # E.g. https://bastar.dcourts.gov.in/wp-content/.../somefile.pdf
-                print(f"  Downloading Order PDF: {pdf_url}")
+                print(f"  Downloading New Order PDF: {pdf_url}")
                 pdf_data_resp = session.get(pdf_url, headers=HEADERS, timeout=20)
                 if pdf_data_resp.status_code == 200:
-                    local_pdf_name = f"order_{cno}_{order['order_date']}.pdf"
                     local_pdf_path = f"{TEMP_DIR}/{local_pdf_name}"
                     with open(local_pdf_path, "wb") as f:
                         f.write(pdf_data_resp.content)
                         
                     # Upload to Supabase Storage
-                    s3_path = f"bdc/cases/{year}/{status}/{cno}/orders/{order['order_date']}.pdf"
                     s3_public_url = upload_pdf_to_storage(local_pdf_path, s3_path)
                     
                     # Clean up local file
@@ -699,13 +717,23 @@ def sync(progress_callback=None, max_cases=None):
                         pass
                         
                     processed_orders.append({
-                        "order_date": order["order_date"],
+                        "order_date": order_date_str,
                         "order_type": order["order_type"],
                         "file_name": local_pdf_name,
                         "storage_path": s3_path,
                         "pdf_url": s3_public_url
                     })
                     
+            # Load the local court_styles.css if it exists to render identical styles
+            css_content = ""
+            css_path = "projects/bdc_scrape/court_styles.css"
+            if os.path.exists(css_path):
+                try:
+                    with open(css_path, "r", encoding="utf-8") as css_f:
+                        css_content = css_f.read()
+                except Exception as css_err:
+                    print(f"  Warning: Failed to read local CSS file: {css_err}")
+            
             # Generate Case Page printout PDF locally
             page_pdf_name = f"case_details_{cno}.pdf"
             page_pdf_path = f"{TEMP_DIR}/{page_pdf_name}"
@@ -719,6 +747,7 @@ def sync(progress_callback=None, max_cases=None):
                     table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; }}
                     th, td {{ border: 1px solid #ccc; padding: 8px; text-align: left; }}
                     th {{ background-color: #f2f2f2; }}
+                    {css_content}
                 </style>
             </head>
             <body>
