@@ -142,19 +142,15 @@ def run_bdc():
 
     # Next Hearing Date Range filter
     st.write("") # spacing
-    enable_date_filter = st.checkbox("Filter by Next Hearing Date", value=False)
-    if enable_date_filter:
-        dates = pd.to_datetime(df_cases['next_hearing']).dropna()
-        if not dates.empty:
-            min_date, max_date = dates.min().date(), dates.max().date()
-        else:
-            from datetime import date
-            min_date, max_date = date.today(), date.today()
-        if min_date > max_date:
-            min_date, max_date = max_date, min_date
-        date_range = st.date_input("Next Hearing Date Range", [min_date, max_date])
+    dates = pd.to_datetime(df_cases['next_hearing']).dropna()
+    if not dates.empty:
+        min_date, max_date = dates.min().date(), dates.max().date()
     else:
-        date_range = None
+        from datetime import date
+        min_date, max_date = date.today(), date.today()
+    if min_date > max_date:
+        min_date, max_date = max_date, min_date
+    date_range = st.date_input("Next Hearing Date Range", [min_date, max_date])
             
     # Apply filters
     filtered_df = df_cases
@@ -170,7 +166,7 @@ def run_bdc():
             filtered_df['petitioners_str'].str.lower().str.contains(search_query) |
             filtered_df['respondents_str'].str.lower().str.contains(search_query)
         ]
-    if enable_date_filter and date_range and len(date_range) == 2:
+    if date_range and len(date_range) == 2:
         start_date, end_date = date_range
         filtered_df = filtered_df[
             filtered_df['next_hearing'].notna() &
