@@ -5,10 +5,11 @@ import requests
 import sys
 from dotenv import load_dotenv
 
-# Add current directory to path for local imports
+# Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 load_dotenv()
 
@@ -19,7 +20,7 @@ def get_secret(key):
         return os.getenv(key)
 
 def run_query(query, params=None):
-    from db import get_db_connection
+    from bdc_scrape.db import get_db_connection
     conn = get_db_connection()
     cur = conn.cursor()
     try:

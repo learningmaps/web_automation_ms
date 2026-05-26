@@ -8,6 +8,18 @@
 - **Playwright Learnings**: All Playwright-based scraper research and learning markdown files must be stored in the `/playwright_mcp/learnings/` directory.
 - **Git Safety**: The `/maintenance` folder is intended for local use only and must always be excluded from source control via `.gitignore`. us this folder to perform all the  tests.
 
+## Python Imports & Namespace Isolation
+- **Absolute Package Imports**: Avoid dynamically appending sub-project directories (e.g. `sys.path.append(current_dir)`) to `sys.path` to prevent module namespace collisions (such as loading the wrong `scraper.py`, `constants.py`, or `utils.py` in persistent web apps like Streamlit).
+- **Module Prefixes**: Always use absolute package-style imports starting from the `projects/` subfolder directory or root folder (e.g. `from mstc_py.scraper import ...` or `from parivesh_auto.utils import ...` instead of `from scraper import ...`).
+- **Path Resolution**: When writing scripts intended to run both standalone (e.g. in GitHub Actions) and integrated via the main hub, add the parent `projects/` directory to `sys.path` inside the script's entry point using:
+  ```python
+  import sys
+  import os
+  parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+  if parent_dir not in sys.path:
+      sys.path.insert(0, parent_dir)
+  ```
+
 ## Extraction Workflow
 - **Markdown Conversion**: Before sending data to the LLM for extraction, always convert PDFs to Markdown using `markitdown`.
 - **Sequential Fallback Strategy**: The system attempts extraction using a tiered list of models to maximize reliability. If a model fails, it automatically falls back to the next one in the following order:

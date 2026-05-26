@@ -90,13 +90,14 @@ def refresh_materialized_view():
         conn.close()
 
 def run_parivesh():
-    # Handle paths for local imports
+    # Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir not in sys.path:
-        sys.path.append(current_dir)
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
         
-    from utils import PariveshScraper
-    from constants import KEYWORDS, TABLE_NAME
+    from parivesh_auto.utils import PariveshScraper
+    from parivesh_auto.constants import KEYWORDS, TABLE_NAME
 
     # ─── STYLING ───
     st.markdown("""

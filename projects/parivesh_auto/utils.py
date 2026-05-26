@@ -10,8 +10,15 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
 import os
+
+# Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
+import sys
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from common.document_processing import convert_pdf_to_markdown
-from constants import KEYWORDS, TABLE_NAME
+from parivesh_auto.constants import KEYWORDS, TABLE_NAME
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 

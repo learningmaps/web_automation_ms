@@ -6,8 +6,15 @@ import re
 from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from extractor import safe_extract
-from schemas import PAGE_SCHEMA_MAP
+
+# Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
+import sys
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from mstc_py.extractor import safe_extract
+from mstc_py.schemas import PAGE_SCHEMA_MAP
 
 load_dotenv()
 

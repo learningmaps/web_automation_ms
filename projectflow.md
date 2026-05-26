@@ -183,3 +183,15 @@ The Supabase database is secured using RLS on all tables in the `mstc`, `parives
 ### Environment Management
 - **Local Development**: Sensitive keys are stored in a `.env` file, which is excluded from source control.
 - **GitHub Actions**: The `service_role` key and Supabase URL are managed via GitHub Repository Secrets.
+
+---
+
+## 7. Python Imports & Search Path Architecture
+
+In a persistent multi-app monorepo environment (like Streamlit Cloud), the system isolates sub-project imports using absolute package paths rather than dynamic runtime search path modification (`sys.path.append(current_dir)`).
+
+### Search Path Setup
+1. **Unified Hub**: The root launcher `main_app.py` appends the `projects/` directory to `sys.path`. This enables importing sub-project dashboards as top-level modules (e.g., `from mstc_py.app import run_mstc`).
+2. **Sub-projects**: Each sub-project's entry points (`app.py`, `main.py`, etc.) dynamically insert the parent `projects/` directory to `sys.path` (rather than their own sub-folder directory).
+3. **Module Resolution**: All internal module imports within sub-projects specify the package prefix (e.g., `from mstc_py.scraper import ...` or `from parivesh_auto.constants import ...`). This prevents Python's `sys.modules` cache from encountering namespace collisions for duplicate filenames (like `scraper.py`, `constants.py`, and `utils.py`).
+
