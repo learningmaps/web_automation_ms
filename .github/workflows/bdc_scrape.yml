@@ -3,8 +3,8 @@ name: Bastar Court Scraper Pipeline
 on:
   workflow_dispatch:
   schedule:
-    # Run twice a month on the 1st and 15th at midnight UTC (Option A)
-    - cron: '0 0 1,15 * *'
+    # Run twice a month on the 1st and 15th at 3 PM UTC
+    - cron: '0 15 1,15 * *'
 
 jobs:
   scrape-and-sync:

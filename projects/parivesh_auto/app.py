@@ -9,6 +9,7 @@ import traceback
 import logging
 import os
 import sys
+import requests
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -88,6 +89,31 @@ def refresh_materialized_view():
         st.exception(e)
     finally:
         conn.close()
+
+def trigger_parivesh_scrape_workflow(limit=50):
+    token = get_secret("GITHUB_TOKEN")
+    repo = get_secret("GITHUB_REPO")
+    
+    if not token or not repo:
+        st.error(f"GitHub Credentials missing. Token: {'Set' if token else 'Missing'}, Repo: {repo if repo else 'Missing'}")
+        return False
+
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/parivesh_scrape.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    data = {"ref": "main", "inputs": {"limit": str(limit)}}
+    
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        if resp.status_code != 204:
+            st.error(f"GitHub API Error: {resp.status_code} - {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"Request failed: {e}")
+        return False
 
 def run_parivesh():
     # Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
@@ -191,6 +217,17 @@ def run_parivesh():
             if st.button("Refresh View", use_container_width=True, help="Re-calculates the consolidated view in the database."):
                 refresh_materialized_view()
                 st.rerun()
+
+        st.write("")
+        c_gh1, c_gh2 = st.columns([1.2, 2])
+        with c_gh1:
+            limit_gh = st.number_input("Limit (GitHub Action)", min_value=1, max_value=500, value=50, step=10, label_visibility="collapsed")
+        with c_gh2:
+            if st.button("Trigger GitHub Action", use_container_width=True, help="Trigger the Parivesh Scraper weekly pipeline on GitHub Actions"):
+                if trigger_parivesh_scrape_workflow(limit=limit_gh):
+                    st.toast("GitHub Action triggered successfully!")
+                else:
+                    st.error("Failed to trigger GitHub Action.")
 
         if st.session_state.get('is_syncing', False):
             with st.status("Syncing with Parivesh Server...", expanded=True) as status:

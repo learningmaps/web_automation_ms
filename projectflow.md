@@ -25,6 +25,9 @@ graph TD
         Hub --> Parivesh_UI[Parivesh Portal]
         Parivesh_UI --> Parivesh_Sync[Local Scraper/Sync]
         Parivesh_Sync --> DB
+        Parivesh_UI --> Parivesh_GH[GitHub Action]
+        Parivesh_GH --> Parivesh_Run[run_scraper.py]
+        Parivesh_Run --> DB
         DB --> MatView[Materialized View]
         MatView --> Parivesh_UI
     end
@@ -101,14 +104,14 @@ graph TD
 
 ## 4. Data Flow: Parivesh Monitoring
 
-### Stage 1: Metadata Sync
-1. **User Action**: Clicks "Fetch New Documents" in the Parivesh Portal.
-2. **Logic**: `utils.py` (`PariveshScraper`) queries Parivesh APIs for recent meeting records (SEIAA, SEAC, EAC).
+### Stage 1: Metadata Sync & PDF Extraction (Trigger)
+1. **Manual / Scheduled Action**: A weekly GitHub Action cron job (`parivesh_scrape.yml` at 03:00 UTC Mondays) or manual trigger runs `run_scraper.py`. Optionally, the user can click "Fetch New Documents" in the Streamlit Parivesh Portal for local execution.
+2. **Logic**: `run_scraper.py` (calling `PariveshScraper` in `utils.py`) queries Parivesh APIs for recent meeting records (SEIAA, SEAC, EAC).
 3. **Storage**: Initial metadata is stored in `parivesh.agenda_v3`.
 
 ### Stage 2: Document Processing & Consolidation
 1. **PDF Sync**: The scraper downloads the associated Agenda and MOM PDFs.
-2. **Keyword Matching**: Subject lines and PDF text are scanned for specific monitoring keywords.
+2. **Keyword Matching**: Subject lines and PDF text are converted to Markdown using `markitdown` and scanned for specific monitoring keywords.
 3. **Consolidation**: A PostgreSQL Materialized View (`parivesh.mv_consolidated_projects`) joins related Agendas and MOMs based on meeting IDs.
 4. **Visualization**: Streamlit fetches from this view to present a unified project timeline.
 
@@ -168,7 +171,7 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 - **`GEMINI.md`**: Project-wide mandates for extraction models, visual identity (Streamlit Red `#ff4b4b`), and directory structure.
 
 ### External Integrations
-- **GitHub Actions**: Offloads heavy LLM processing tasks to GitHub's infrastructure to avoid Streamlit timeout limits.
+- **GitHub Actions**: Offloads heavy scraper metadata fetching and PDF processing tasks to GitHub's infrastructure (MSTC, Bastar Court, and Parivesh scrapers) to avoid Streamlit timeout limits.
 - **Google Gemini API**: Provides high-reasoning extraction capabilities with deterministic output (`temperature=0.0`) and solves scraper CAPTCHAs.
 
 ### Verification Utilities
