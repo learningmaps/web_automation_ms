@@ -117,14 +117,15 @@ def run_mstc():
             st.metric("Failed", total_failed)
 
     with col_right:
-        # Layout the slider and the buttons
-        c_slider, c_btn1, c_btn2, c_btn3 = st.columns([1.2, 1.4, 1.6, 1.6], gap="small")
+        # 1. Row for Batch Limit slider
+        c_slider = st.columns([1])[0]
         with c_slider:
             st.write("Batch Limit")
             batch_limit = st.slider("Limit", 1, 50, 10, label_visibility="collapsed")
         
-        # Add spacing to align buttons vertically with metrics
+        # 2. Row for Buttons directly below it
         st.write("")
+        c_btn1, c_btn2, c_btn3 = st.columns([1, 1.2, 1.2], gap="small")
         with c_btn1:
             if st.button("Local Fetch", use_container_width=True, help="Fetch New PDF Links Locally"):
                 progress_bar = st.progress(0)
