@@ -79,25 +79,6 @@ def run_mstc():
     total_processed = len(df_stats[df_stats['status'] == 'processed']) if not df_stats.empty else 0
     total_failed = len(df_stats[df_stats['status'] == 'failed']) if not df_stats.empty else 0
 
-    top_col1, top_col2, top_col3, top_col4, top_col5 = st.columns([2.5, 1, 1, 1, 2])
-
-    with top_col1:
-        st.title("MSTC Automation")
-
-    with top_col2:
-        st.metric("Pending", total_pending)
-
-    with top_col3:
-        st.metric("Processed", total_processed)
-
-    with top_col4:
-        st.metric("Failed", total_failed)
-
-    with top_col5:
-        # Batch size slider
-        st.write("Extraction Batch Limit")
-        batch_limit = st.slider("Limit", 1, 50, 10, label_visibility="collapsed")
-        
     # Accent Button Styling
     st.markdown("""
         <style>
@@ -122,34 +103,53 @@ def run_mstc():
         </style>
     """, unsafe_allow_html=True)
 
-    # Dedicated full-width row for controls below the title and metrics
-    st.write("")
-    c1, c2, c3 = st.columns([1, 1.2, 1.2])
-    with c1:
-        if st.button("Local Fetch", use_container_width=True, help="Fetch New PDF Links Locally"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            def update_progress(current, total, message):
-                progress_bar.progress(current / total)
-                status_text.text(message)
-            try:
-                scrape_links(progress_callback=update_progress)
-                st.success("Done")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-    with c2:
-        if st.button("Run Remote Pipeline", use_container_width=True, help="Trigger both Crawl & Extract on GitHub Actions"):
-            if trigger_github_extraction("both", batch_limit):
-                st.success("Triggered")
-            else:
-                st.error("Failed")
-    with c3:
-        if st.button("Remote Extract Only", use_container_width=True, help="Trigger PDF Extraction only on GitHub Actions"):
-            if trigger_github_extraction("extract", batch_limit):
-                st.success("Triggered")
-            else:
-                st.error("Failed")
+    # Use a Left/Right split: Left for metrics & title, Right for controls
+    col_left, col_right = st.columns([4.5, 5.5], gap="large")
+
+    with col_left:
+        st.title("MSTC Automation")
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Pending", total_pending)
+        with m2:
+            st.metric("Processed", total_processed)
+        with m3:
+            st.metric("Failed", total_failed)
+
+    with col_right:
+        # Layout the slider and the buttons
+        c_slider, c_btn1, c_btn2, c_btn3 = st.columns([1.2, 1.4, 1.6, 1.6], gap="small")
+        with c_slider:
+            st.write("Batch Limit")
+            batch_limit = st.slider("Limit", 1, 50, 10, label_visibility="collapsed")
+        
+        # Add spacing to align buttons vertically with metrics
+        st.write("")
+        with c_btn1:
+            if st.button("Local Fetch", use_container_width=True, help="Fetch New PDF Links Locally"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                def update_progress(current, total, message):
+                    progress_bar.progress(current / total)
+                    status_text.text(message)
+                try:
+                    scrape_links(progress_callback=update_progress)
+                    st.success("Done")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        with c_btn2:
+            if st.button("Run Pipeline", use_container_width=True, help="Trigger both Crawl & Extract on GitHub"):
+                if trigger_github_extraction("both", batch_limit):
+                    st.success("Triggered")
+                else:
+                    st.error("Failed")
+        with c_btn3:
+            if st.button("Extract Only", use_container_width=True, help="Trigger PDF Extraction only on GitHub"):
+                if trigger_github_extraction("extract", batch_limit):
+                    st.success("Triggered")
+                else:
+                    st.error("Failed")
 
     st.divider()
 
