@@ -31,7 +31,7 @@ def get_supabase() -> Client:
         st.stop()
     return create_client(url, key)
 
-def trigger_github_extraction(limit=10):
+def trigger_github_extraction(task="extract", limit=10):
     token = get_secret("GITHUB_TOKEN")
     repo = get_secret("GITHUB_REPO")
     
@@ -44,8 +44,8 @@ def trigger_github_extraction(limit=10):
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json",
     }
-    # Explicitly set task to 'extract'
-    data = {"ref": "main", "inputs": {"task": "extract", "limit": str(limit)}}
+    # Set task to the chosen action (e.g. 'crawl', 'extract', 'both')
+    data = {"ref": "main", "inputs": {"task": task, "limit": str(limit)}}
     
     try:
         resp = requests.post(url, headers=headers, json=data)
@@ -56,6 +56,7 @@ def trigger_github_extraction(limit=10):
     except Exception as e:
         st.error(f"Request failed: {e}")
         return False
+
 
 def format_dates(df, date_cols):
     """Utility to format date columns to YYYY-MM-DD HH:MM."""
@@ -119,9 +120,9 @@ def run_mstc():
             </style>
         """, unsafe_allow_html=True)
 
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("Fetch", width="stretch", help="Fetch New PDF Links"):
+            if st.button("Local Fetch", width="stretch", help="Fetch New PDF Links Locally"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 def update_progress(current, total, message):
@@ -134,8 +135,14 @@ def run_mstc():
                 except Exception as e:
                     st.error(f"Error: {e}")
         with c2:
-            if st.button("Extract", width="stretch", help="Extract Data from PDFs"):
-                if trigger_github_extraction(batch_limit):
+            if st.button("Run Pipeline", width="stretch", help="Trigger both Crawl & Extract on GitHub Actions"):
+                if trigger_github_extraction("both", batch_limit):
+                    st.success("Triggered")
+                else:
+                    st.error("Failed")
+        with c3:
+            if st.button("Extract Only", width="stretch", help="Trigger PDF Extraction only on GitHub Actions"):
+                if trigger_github_extraction("extract", batch_limit):
                     st.success("Triggered")
                 else:
                     st.error("Failed")

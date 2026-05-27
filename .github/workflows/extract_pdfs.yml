@@ -11,7 +11,7 @@ on:
       task:
         description: 'Task to run: "crawl", "extract", or "both"'
         required: true
-        default: 'extract'
+        default: 'both'
 
   # Also runs once a week automatically (Mondays at 08:00 UTC)
   schedule:
@@ -37,7 +37,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Crawler
-        if: ${{ github.event.inputs.task == 'crawl' || github.event.inputs.task == 'both' }}
+        if: ${{ github.event.inputs.task == 'crawl' || github.event.inputs.task == 'both' || github.event_name == 'schedule' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -54,3 +54,4 @@ jobs:
           LIMIT: ${{ github.event.inputs.limit || '10' }}
           PYTHONPATH: .
         run: python projects/mstc_py/main.py
+

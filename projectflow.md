@@ -52,8 +52,9 @@ graph TD
 ### 2.2 MSTC Portal (`projects/mstc_py/app.py`)
 - **Metrics Bar**: Displays real-time counts of `Pending`, `Processed`, and `Failed` PDFs.
 - **Controls**:
-  - **Fetch**: Triggers the Playwright scraper to find new PDF links from MSTC pages.
-  - **Extract**: Triggers a remote GitHub Action to perform LLM-based data extraction.
+  - **Local Fetch**: Triggers the local Playwright scraper to find new PDF links from MSTC pages and save them to the DB.
+  - **Run Pipeline**: Triggers a remote GitHub Action pipeline that runs both the Crawler and the Extractor sequentially.
+  - **Extract Only**: Triggers a remote GitHub Action pipeline to only run the Extractor on existing pending PDFs.
 - **Data Views**:
   - **Scraped URLs**: Tracks the discovery and status of every PDF.
   - **Mine Block Summaries**: Shows extracted geological and land data.
@@ -80,13 +81,13 @@ graph TD
 ## 3. Data Flow: MSTC Mineral Blocks
 
 ### Stage 1: Discovery (Scraping)
-1. **User Action**: Clicks "Fetch" in the MSTC Portal.
-2. **Logic**: `scraper.py` uses Playwright to navigate MSTC listing pages.
+1. **User Action**: Clicks "Local Fetch" in the MSTC Portal, or triggers a remote run via "Run Pipeline" on GitHub Actions.
+2. **Logic**: `scraper.py` queries MSTC listing pages.
 3. **Storage**: Discovered PDF URLs are saved into `mstc.processed_pdfs` with status `pending`.
 
 ### Stage 2: Extraction (LLM Processing)
-1. **User Action**: Clicks "Extract" in the MSTC Portal.
-2. **Trigger**: Streamlit calls the GitHub API to dispatch the `extract_pdfs.yml` workflow.
+1. **User Action**: Clicks "Run Pipeline" (triggers Crawl then Extract) or "Extract Only" in the MSTC Portal, or execution occurs via weekly automated schedule.
+2. **Trigger**: Streamlit calls the GitHub API to dispatch the `extract_pdfs.yml` workflow with either `task: "both"` or `task: "extract"`.
 3. **Execution**: The workflow runs `projects/mstc_py/main.py`:
    - **Download**: Downloads the PDF from the stored URL.
    - **Conversion**: `common.document_processing` uses `markitdown` to convert the PDF to Markdown.
