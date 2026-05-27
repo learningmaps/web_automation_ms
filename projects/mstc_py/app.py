@@ -79,7 +79,7 @@ def run_mstc():
     total_processed = len(df_stats[df_stats['status'] == 'processed']) if not df_stats.empty else 0
     total_failed = len(df_stats[df_stats['status'] == 'failed']) if not df_stats.empty else 0
 
-    top_col1, top_col2, top_col3, top_col4, top_col5 = st.columns([2, 1, 1, 1, 1.5])
+    top_col1, top_col2, top_col3, top_col4, top_col5 = st.columns([2.5, 1, 1, 1, 2])
 
     with top_col1:
         st.title("MSTC Automation")
@@ -94,58 +94,62 @@ def run_mstc():
         st.metric("Failed", total_failed)
 
     with top_col5:
+        # Batch size slider
+        st.write("Extraction Batch Limit")
         batch_limit = st.slider("Limit", 1, 50, 10, label_visibility="collapsed")
         
-        # Accent Button Styling
-        st.markdown("""
-            <style>
-            div.stButton > button {
-                background-color: white !important;
-                color: #0F172A !important;
-                border: 1px solid #ff4b4b !important;
-                font-weight: 600 !important;
-                height: 42px !important;
-                border-radius: 8px !important;
-                transition: all 0.2s ease !important;
-            }
-            div.stButton > button:hover {
-                background-color: #ff4b4b !important;
-                color: white !important;
-                box-shadow: 0 4px 12px rgba(255, 75, 75, 0.2) !important;
-                transform: translateY(-1px);
-            }
-            div.stButton > button:active {
-                transform: translateY(0);
-            }
-            </style>
-        """, unsafe_allow_html=True)
+    # Accent Button Styling
+    st.markdown("""
+        <style>
+        div.stButton > button {
+            background-color: white !important;
+            color: #0F172A !important;
+            border: 1px solid #ff4b4b !important;
+            font-weight: 600 !important;
+            height: 42px !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+        div.stButton > button:hover {
+            background-color: #ff4b4b !important;
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(255, 75, 75, 0.2) !important;
+            transform: translateY(-1px);
+        }
+        div.stButton > button:active {
+            transform: translateY(0);
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("Local Fetch", width="stretch", help="Fetch New PDF Links Locally"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                def update_progress(current, total, message):
-                    progress_bar.progress(current / total)
-                    status_text.text(message)
-                try:
-                    scrape_links(progress_callback=update_progress)
-                    st.success("Done")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-        with c2:
-            if st.button("Run Pipeline", width="stretch", help="Trigger both Crawl & Extract on GitHub Actions"):
-                if trigger_github_extraction("both", batch_limit):
-                    st.success("Triggered")
-                else:
-                    st.error("Failed")
-        with c3:
-            if st.button("Extract Only", width="stretch", help="Trigger PDF Extraction only on GitHub Actions"):
-                if trigger_github_extraction("extract", batch_limit):
-                    st.success("Triggered")
-                else:
-                    st.error("Failed")
+    # Dedicated full-width row for controls below the title and metrics
+    st.write("")
+    c1, c2, c3 = st.columns([1, 1.2, 1.2])
+    with c1:
+        if st.button("Local Fetch", use_container_width=True, help="Fetch New PDF Links Locally"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            def update_progress(current, total, message):
+                progress_bar.progress(current / total)
+                status_text.text(message)
+            try:
+                scrape_links(progress_callback=update_progress)
+                st.success("Done")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+    with c2:
+        if st.button("Run Remote Pipeline", use_container_width=True, help="Trigger both Crawl & Extract on GitHub Actions"):
+            if trigger_github_extraction("both", batch_limit):
+                st.success("Triggered")
+            else:
+                st.error("Failed")
+    with c3:
+        if st.button("Remote Extract Only", use_container_width=True, help="Trigger PDF Extraction only on GitHub Actions"):
+            if trigger_github_extraction("extract", batch_limit):
+                st.success("Triggered")
+            else:
+                st.error("Failed")
 
     st.divider()
 
