@@ -35,6 +35,31 @@ def get_supabase() -> Client:
     key = os.getenv("SUPABASE_KEY")
     return create_client(url, key)
 
+def fuzzy_match_block(extracted_name: str, blocks: list[dict]) -> dict | None:
+    extracted_tokens = set(re.findall(r'\w+', extracted_name.lower()))
+    best = None
+    best_score = 0.0
+
+    for block in blocks:
+        db_name = block.get('block_name', '') or ''
+        db_tokens = set(re.findall(r'\w+', db_name.lower()))
+
+        if extracted_name.lower() == db_name.lower():
+            return block
+
+        if extracted_name.lower() in db_name.lower() or db_name.lower() in extracted_name.lower():
+            score = 0.8
+        else:
+            if not extracted_tokens or not db_tokens:
+                continue
+            score = len(extracted_tokens & db_tokens) / len(extracted_tokens | db_tokens)
+
+        if score > best_score:
+            best_score = score
+            best = block
+
+    return best if best_score >= 0.7 else None
+
 def process_pending_pdfs(limit=10):
     supabase = get_supabase()
     print(f"--- STARTING PDF EXTRACTOR (PYTHON) - Limit: {limit} ---")
@@ -57,7 +82,7 @@ def process_pending_pdfs(limit=10):
         file_id = pdf['file_id']
         pdf_url = pdf['pdf_url']
         source = pdf['source_page']
-        page_name = 'Mine Block Summary' if source == 'mine_block_summary' else 'Notice Inviting Tender'
+        page_name = 'Mine Block Summary' if source == 'mine_block_summary' else 'Notice Inviting Tender' if source == 'nit' else 'Corrigendum and Addendum'
 
         print(f"Processing {file_id} ({page_name})...")
 
@@ -131,6 +156,21 @@ def process_pending_pdfs(limit=10):
                         "reserve_price": b.reservePrice
                     } for b in d.blocks]
                     supabase.schema("mstc").table("tender_blocks").insert(blocks_to_insert).execute()
+
+            elif source == 'corrigendum_addendum':
+                d = extracted_data
+                blocks_cache = supabase.schema("mstc").table("mine_block_summaries").select("block_name, state, district").execute()
+                match = fuzzy_match_block(d.blockName, blocks_cache.data)
+                if match:
+                    d.state = match['state'] or d.state
+                    d.district = match['district'] or d.district
+                supabase.schema("mstc").table("corrigendum_addendum").upsert({
+                    "pdf_id": pdf['id'],
+                    "block_name": d.blockName,
+                    "state": d.state,
+                    "district": d.district,
+                    "summary": d.summary
+                }, on_conflict="pdf_id").execute()
 
             # 4. Mark as Processed
             supabase.schema("mstc").table("processed_pdfs").update({

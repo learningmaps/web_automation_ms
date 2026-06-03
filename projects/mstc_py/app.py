@@ -155,7 +155,7 @@ def run_mstc():
     st.divider()
 
     # --- DATA VIEWERS ---
-    tab1, tab2, tab3 = st.tabs(["Scraped URLs", "Mine Block Summaries", "Tenders (NIT)"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Scraped URLs", "Mine Block Summaries", "Tenders (NIT)", "Corrigendum & Addendum"])
 
     with tab1:
         st.subheader("All Scraped PDF URLs")
@@ -344,6 +344,46 @@ def run_mstc():
             )
         else:
             st.info("No tender data extracted yet.")
+
+    with tab4:
+        st.subheader("Corrigendum & Addendum")
+        corr_resp = supabase.schema("mstc").table("corrigendum_addendum").select("*, processed_pdfs(discovered_at, file_id, pdf_url)").order("pdf_id", desc=True).execute()
+        if corr_resp.data:
+            df_corr = pd.DataFrame(corr_resp.data)
+            if 'processed_pdfs' in df_corr.columns:
+                nested_df = pd.json_normalize(df_corr['processed_pdfs'])
+                df_corr = pd.concat([df_corr.drop(columns=['processed_pdfs']), nested_df], axis=1)
+
+            f1, f2 = st.columns(2)
+            with f1:
+                states = sorted(df_corr['state'].dropna().unique().tolist())
+                sel_states = st.multiselect("Filter by State", states, placeholder="All States", key="corr_state")
+            with f2:
+                districts = sorted(df_corr['district'].dropna().unique().tolist())
+                sel_districts = st.multiselect("Filter by District", districts, placeholder="All Districts", key="corr_district")
+
+            mask = pd.Series([True] * len(df_corr))
+            if sel_states:
+                mask &= df_corr['state'].isin(sel_states)
+            if sel_districts:
+                mask &= df_corr['district'].isin(sel_districts)
+
+            df_filtered = df_corr[mask].copy()
+            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'state', 'district', 'summary']
+            drop_cols = ['id', 'pdf_id']
+            other_cols = [c for c in df_filtered.columns if c not in req_cols and c not in drop_cols]
+            df_filtered = df_filtered[req_cols + other_cols]
+
+            st.dataframe(
+                df_filtered,
+                use_container_width=True,
+                column_config={
+                    "pdf_url": st.column_config.LinkColumn("PDF Link"),
+                    "summary": st.column_config.TextColumn("Summary", help="Bullet-point summary of changes")
+                }
+            )
+        else:
+            st.info("No corrigendum data extracted yet.")
 
     st.divider()
     st.caption("Data is synced live from Supabase. Backend runs on GitHub Actions.")

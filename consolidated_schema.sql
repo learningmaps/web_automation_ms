@@ -64,6 +64,19 @@ CREATE TABLE IF NOT EXISTS mstc.tender_blocks (
     reserve_price TEXT
 );
 
+-- 5. Table for Corrigendum and Addendum
+CREATE TABLE IF NOT EXISTS mstc.corrigendum_addendum (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pdf_id UUID UNIQUE REFERENCES mstc.processed_pdfs(id) ON DELETE CASCADE,
+    block_name TEXT,
+    state TEXT,
+    district TEXT,
+    summary TEXT
+);
+
+ALTER TABLE mstc.corrigendum_addendum ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Read Access" ON mstc.corrigendum_addendum FOR SELECT USING (true);
+
 -- ─── PARIVESH SCHEMA TABLES ───
 
 -- 1. Main Agenda Table

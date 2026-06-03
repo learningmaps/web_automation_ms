@@ -9,7 +9,8 @@ load_dotenv()
 
 URLS = {
     'mine_block_summary': 'https://www.mstcecommerce.com/auctionhome/container.jsp?title_id=Mine%20Block%20Summary&linkid=0&main_link=y&sublink=n&main_link_name=429&portal=mlcl&homepage=index&arcDate=30-11-2021',
-    'nit': 'https://www.mstcecommerce.com/auctionhome/container.jsp?title_id=Notice%20Inviting%20Tender&linkid=0&main_link=y&sublink=n&main_link_name=427&portal=mlcl&homepage=index&arcDate=30-11-2021'
+    'nit': 'https://www.mstcecommerce.com/auctionhome/container.jsp?title_id=Notice%20Inviting%20Tender&linkid=0&main_link=y&sublink=n&main_link_name=427&portal=mlcl&homepage=index&arcDate=30-11-2021',
+    'corrigendum_addendum': 'https://www.mstcecommerce.com/auctionhome/container.jsp?title_id=Corrigendum%20and%20Addendum&linkid=0&main_link=y&sublink=n&main_link_name=431&portal=mlcl&homepage=index&arcDate=30-11-2021'
 }
 
 def get_supabase() -> Client:

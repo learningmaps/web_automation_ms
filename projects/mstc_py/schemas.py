@@ -46,6 +46,13 @@ class NIT(BaseModel):
     bidSecurityEMD: str = Field(description="Earnest Money Deposit / Bid Security amount")
     blocks: List[TenderBlock] = Field(description="The complete list of mineral blocks listed in the auction table")
 
+# 3. Corrigendum and Addendum Schema
+class CorrigendumAddendum(BaseModel):
+    blockName: str = Field(description="Name of the mineral block(s) this document refers to. If multiple blocks are mentioned, join them with commas.")
+    state: str = Field(description="Indian state inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
+    district: str = Field(description="Indian district inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
+    summary: str = Field(description="Crisp bullet-point summary of every change proposed in the document, covering all of them without leaving any out.")
+
 # Mapping object for the extractor
 PAGE_SCHEMA_MAP = {
     'Mine Block Summary': {
@@ -55,5 +62,27 @@ PAGE_SCHEMA_MAP = {
     'Notice Inviting Tender': {
         'model': NIT,
         'prompt': 'Extract tender details including dates, fees, and the full list of mineral blocks listed in the document. Ensure all columns in the block table are captured correctly.'
+    },
+    'Corrigendum and Addendum': {
+        'model': CorrigendumAddendum,
+        'prompt': """Extract the corrigendum/addendum details from this document.
+
+For block_name:
+- Find the name of the mineral block(s) this document refers to.
+- If multiple blocks are mentioned, join them with commas.
+- This is the most important field — extract it as precisely as possible.
+
+For state and district:
+- Do NOT look for these in the document text — they will almost never be there.
+- Instead, use your geographical knowledge of Indian mineral blocks to
+  determine the state and district purely from the block_name you extracted.
+- For example:
+    - "Nawara-Nawadih Glauconite Block" → Bihar, Rohtas
+    - "Kalapathar-Raghudih REE and RM Block" → West Bengal, Purulia
+- If you are genuinely unsure about a block you cannot place, use "Not specified".
+
+For summary:
+- Summarize every change proposed in the document as crisp bullet points.
+- Do not leave out any change, no matter how minor."""
     }
 }
