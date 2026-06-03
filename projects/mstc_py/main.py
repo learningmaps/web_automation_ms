@@ -167,6 +167,7 @@ def process_pending_pdfs(limit=10):
                 supabase.schema("mstc").table("corrigendum_addendum").upsert({
                     "pdf_id": pdf['id'],
                     "block_name": d.blockName,
+                    "document_date": normalize_timestamp(d.documentDate),
                     "state": d.state,
                     "district": d.district,
                     "summary": d.summary

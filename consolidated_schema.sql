@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS mstc.corrigendum_addendum (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pdf_id UUID UNIQUE REFERENCES mstc.processed_pdfs(id) ON DELETE CASCADE,
     block_name TEXT,
+    document_date DATE,
     state TEXT,
     district TEXT,
     summary TEXT

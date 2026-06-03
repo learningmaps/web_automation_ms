@@ -163,16 +163,43 @@ def run_mstc():
         if urls_resp.data:
             df_urls = pd.DataFrame(urls_resp.data)
             df_urls = format_dates(df_urls, ['discovered_at', 'extracted_at'])
-            # Filter and reorder columns as requested
-            cols = ['discovered_at', 'source_page', 'file_id', 'pdf_url', 'status']
-            df_urls = df_urls[cols]
-            st.dataframe(
-                df_urls, 
-                width="stretch",
+            display_cols = ['id', 'discovered_at', 'source_page', 'file_id', 'pdf_url', 'status']
+
+            edited_df = st.data_editor(
+                df_urls[display_cols],
+                use_container_width=True,
+                disabled=["id", "discovered_at", "source_page", "file_id", "pdf_url"],
                 column_config={
-                    "pdf_url": st.column_config.LinkColumn("PDF Link")
-                }
+                    "id": None,
+                    "pdf_url": st.column_config.LinkColumn("PDF Link"),
+                    "status": st.column_config.SelectboxColumn(
+                        "Status", options=["pending", "processed", "failed"]
+                    ),
+                },
+                key="urls_editor",
             )
+
+            changed_statuses = []
+            for idx in edited_df.index:
+                old = df_urls.loc[idx, "status"]
+                new = edited_df.loc[idx, "status"]
+                if old != new:
+                    changed_statuses.append((edited_df.loc[idx, "id"], new))
+
+            pending = len(changed_statuses)
+            if pending > 0:
+                cols = st.columns([1, 6])
+                with cols[0]:
+                    if st.button(f"Save {pending} change{'s' if pending > 1 else ''}", type="primary", use_container_width=True):
+                        for row_id, new_status in changed_statuses:
+                            supabase.schema("mstc").table("processed_pdfs") \
+                                .update({"status": new_status, "extracted_at": None}) \
+                                .eq("id", row_id).execute()
+                        st.success("Saved!")
+                        st.rerun()
+                with cols[1]:
+                    if st.button("Discard", use_container_width=True):
+                        st.rerun()
         else:
             st.info("No URLs scraped yet.")
 
@@ -369,7 +396,7 @@ def run_mstc():
                 mask &= df_corr['district'].isin(sel_districts)
 
             df_filtered = df_corr[mask].copy()
-            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'state', 'district', 'summary']
+            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'summary']
             drop_cols = ['id', 'pdf_id']
             other_cols = [c for c in df_filtered.columns if c not in req_cols and c not in drop_cols]
             df_filtered = df_filtered[req_cols + other_cols]

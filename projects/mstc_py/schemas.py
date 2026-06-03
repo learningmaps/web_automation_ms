@@ -49,6 +49,7 @@ class NIT(BaseModel):
 # 3. Corrigendum and Addendum Schema
 class CorrigendumAddendum(BaseModel):
     blockName: str = Field(description="Name of the mineral block(s) this document refers to. If multiple blocks are mentioned, join them with commas.")
+    documentDate: str = Field(description="The date of the document as mentioned inside the document. e.g., '23rd January 2025', '15-02-2025'")
     state: str = Field(description="Indian state inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
     district: str = Field(description="Indian district inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
     summary: str = Field(description="Crisp bullet-point summary of every change proposed in the document, covering all of them without leaving any out.")
