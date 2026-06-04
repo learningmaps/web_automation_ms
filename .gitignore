@@ -32,3 +32,5 @@ playwright_mcp/
 .playwright-mcp
 projects/bdc_scrape/temp_files/
 supabase/.temp/
+
+GEMINI.md

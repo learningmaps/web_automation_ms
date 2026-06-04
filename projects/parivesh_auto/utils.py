@@ -9,6 +9,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
 import os
+import fitz
 
 # Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
 import sys
@@ -58,6 +59,11 @@ def extract_proposals_from_text(text: str) -> list[dict]:
         text, re.DOTALL
     )
 
+    FIELD_PREFIXES = [
+        'Proposal No', 'File No', 'Project Name', 'Proposal For',
+        'Activity', 'Sector', 'State', 'District',
+    ]
+
     results = []
     for idx, block in enumerate(blocks):
         p: dict = {}
@@ -79,7 +85,6 @@ def extract_proposals_from_text(text: str) -> list[dict]:
         )
         if m:
             p['project_name'] = ' '.join(m.group(1).split())
-            # Strip trailing standalone sr_no if present
             p['project_name'] = re.sub(r'\s+\d+\s*$', '', p['project_name'])
         else:
             p['project_name'] = ''
@@ -96,41 +101,221 @@ def extract_proposals_from_text(text: str) -> list[dict]:
         m = re.search(r'Sector\s*:\s*(.+)', block)
         p['sector'] = m.group(1).strip() if m else ''
 
-        # State (value may be on same line or next line)
+        # --- State ---
+        # Strategy 1: State: prefix with value before District:
         m = re.search(r'State\s*:\s*(.*?)(?=\n\s*District\s*:)', block, re.DOTALL)
-        p['state'] = m.group(1).strip() if m else ''
+        state_raw = m.group(1).strip() if m else ''
+        # If regex grabbed garbage (has field labels), it matched wrong State:
+        if state_raw and re.search(r'(File No|Proposal\s+(?:No|For)|Project Name)', state_raw, re.IGNORECASE):
+            state_raw = ''
+        # Strategy 2: no State: prefix — scan block for a CHHATTISGARH variant.
+        # Handles column-layout PDFs where "State:" is on one page with empty
+        # value and the actual state name appears later without prefix.
+        if not state_raw:
+            for v in CHHATTISGARH_VARIANTS:
+                m2 = re.search(rf'(?<!\w){re.escape(v)}(?!\w)', block, re.IGNORECASE)
+                if m2:
+                    state_raw = m2.group(0).title()
+                    break
+        p['state'] = state_raw
 
-        # District (value may be on same line or next line)
+        # --- District ---
+        # Strategy 1: normal District: prefix with value before a date
         m = re.search(r'District\s*:\s*(.*?)(?=\n\s*\d{2}/\d{2}/\d{4})', block, re.DOTALL)
-        p['district'] = ' '.join(m.group(1).split()) if m else ''
+        district_raw = ' '.join(m.group(1).split()) if m else ''
+        # Strip trailing standalone numbers (next proposal's sr_no bleeding in)
+        if district_raw:
+            district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
+        # Strategy 2: District: prefix without date lookahead
+        if not district_raw:
+            m = re.search(r'District\s*:\s*(.+)', block)
+            if m:
+                district_raw = ' '.join(m.group(1).split())
+                district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
+        p['district'] = district_raw
 
         # Meeting date (dd/mm/yyyy)
         m = re.search(r'(\d{2}/\d{2}/\d{4})', block)
         p['meeting_date'] = m.group(1) if m else ''
 
-        # Proponent: text after meeting date, stopping at page footers,
-        #       Proposal For (same-proposal detail continuation), or next proposal marker.
-        m = re.search(r'\d{2}/\d{2}/\d{4}\s*\n', block)
-        if m:
-            after_date = block[m.end():]
-            proponent_lines = []
-            for line in after_date.split('\n'):
-                stripped = line.strip()
-                if not stripped:
+        # --- Proponent ---
+        # Strategy: identify line-ranges belonging to known fields and skip them;
+        # everything non-field remaining (after filtering dates/numbers/footers)
+        # is the proponent.  This handles column-based PDFs where field values
+        # and proponent text interleave across columns.
+        block_lines = block.split('\n')
+        # First line is the proposal number (already extracted) — skip it
+        field_ranges = [(0, 1)]
+        i = 1
+        while i < len(block_lines):
+            s = block_lines[i].strip()
+            if any(s.startswith(p) for p in FIELD_PREFIXES):
+                start = i
+                i += 1
+                # Skip continuation lines until next field label or terminator
+                while i < len(block_lines):
+                    ns = block_lines[i].strip()
+                    if not ns:
+                        break
+                    if re.match(r'^(Page\s+\d+|Government of India|Ministry of Environment)', ns, re.IGNORECASE):
+                        i += 1
+                        continue
+                    if any(ns.startswith(p) for p in FIELD_PREFIXES):
+                        break
+                    if re.match(r'^\d{2}/\d{2}/\d{4}$', ns):
+                        break
+                    if re.match(r'^\d+$', ns):
+                        break
+                    i += 1
+                field_ranges.append((start, i))
+            else:
+                i += 1
+
+        extracted_state = p.get('state', '').lower().strip()
+        extracted_district = p.get('district', '').lower().strip()
+
+        proponent_lines = []
+        for i, line in enumerate(block_lines):
+            if any(start <= i < end for start, end in field_ranges):
+                continue
+            s = line.strip()
+            if not s:
+                continue
+            if re.match(r'^\d{2}/\d{2}/\d{4}$', s):
+                continue
+            if re.match(r'^\d+$', s):
+                continue
+            if re.match(r'^(Page\s+\d+|Government of India|Ministry of Environment)', s, re.IGNORECASE):
+                continue
+            if s.lower().strip() == extracted_state:
+                continue
+            if s.lower().strip() == extracted_district:
+                continue
+            if s.lower().strip() in CHHATTISGARH_VARIANTS:
+                continue
+            proponent_lines.append(s)
+
+        p['proponent'] = ' '.join(proponent_lines)
+
+        # State filter: only keep if state matches a Chhattisgarh variant
+        state = p['state'].lower().replace('\n', ' ').strip()
+        if any(v in state for v in CHHATTISGARH_VARIANTS):
+            results.append(p)
+
+    return results
+
+
+def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
+    '''
+    Extract proposals using PyMuPDF's table detection.
+
+    Iterates pages, detects 5-column proposal tables via find_tables(),
+    merges continuation rows, and parses field values from each cell.
+    Falls back to extract_proposals_from_text if no tables found.
+    '''
+    doc = fitz.open(stream=pdf_content, filetype="pdf")
+
+    all_rows = []
+    for page in doc:
+        for table in page.find_tables():
+            if table.col_count != 5:
+                continue
+            cells = table.extract()
+            if not any("Proposal No" in str(c) for row in cells for c in row if c):
+                continue
+            for row in cells:
+                sr = str(row[0]).strip() if row[0] else ''
+                det = str(row[1]) if row[1] else ''
+                if sr and 'Sr.' in sr and 'Proposal' in det[:30]:
                     continue
-                # Stop at known delimiters
-                if stripped.startswith('Proposal For:'):
-                    break
-                if stripped.startswith('Proposal No :'):
-                    break
-                if re.match(r'^(Page\s+\d+|Government of India|Ministry of Environment)', stripped, re.IGNORECASE):
-                    break
-                if re.match(r'^\d+$', stripped):
-                    break
-                proponent_lines.append(stripped)
-            p['proponent'] = ' '.join(proponent_lines)
+                all_rows.append(row)
+    doc.close()
+
+    if not all_rows:
+        return []
+
+    # Merge continuation rows into preceding proposal
+    merged = []
+    for row in all_rows:
+        sr = str(row[0]).strip() if row[0] else ''
+        if sr:
+            merged.append({
+                'details': str(row[1]) if row[1] else '',
+                'location': str(row[2]) if row[2] else '',
+                'meeting_date': str(row[3]) if row[3] else '',
+                'proponent': str(row[4]) if row[4] else '',
+            })
+        elif merged:
+            for ci, key in enumerate(['details', 'location', 'meeting_date', 'proponent'], 1):
+                if row[ci] and str(row[ci]).strip():
+                    separator = '\n' if merged[-1][key] else ''
+                    merged[-1][key] += separator + str(row[ci])
+
+    # Parse fields from each merged proposal's cells
+    results = []
+    for idx, m in enumerate(merged):
+        p: dict = {}
+        p['sr_no'] = idx + 1
+
+        details = m['details']
+        location = m['location']
+
+        # Proposal No
+        match = re.search(r'Proposal No\s*:\s*(\S+)', details)
+        p['proposal_no'] = match.group(1) if match else ''
+
+        # File No
+        match = re.search(r'File No\s*:\s*([^\n]+)', details)
+        p['file_no'] = match.group(1).strip() if match else ''
+
+        # Project Name
+        match = re.search(
+            r'Project Name\s*:\s*(.+?)(?=\n\s*(?:Proposal\s+For|State)\s*:|\Z)',
+            details, re.DOTALL
+        )
+        if match:
+            p['project_name'] = ' '.join(match.group(1).split())
         else:
-            p['proponent'] = ''
+            p['project_name'] = ''
+
+        # Proposal For
+        match = re.search(r'Proposal\s+For\s*:\s*([^\n]+)', details)
+        p['proposal_for'] = match.group(1).strip() if match else ''
+
+        # Activity
+        match = re.search(
+            r'Activity\s*:\s*(.+?)(?=\n\s*Sector\s*:|\Z)', details, re.DOTALL
+        )
+        p['activity'] = ' '.join(match.group(1).split()) if match else ''
+
+        # Sector
+        match = re.search(r'Sector\s*:\s*([^\n]+)', details)
+        p['sector'] = match.group(1).strip() if match else ''
+
+        # State from Location cell
+        match = re.search(
+            r'State\s*:\s*(.+?)(?=\n\s*District\s*:|\Z)', location, re.DOTALL
+        )
+        state_raw = match.group(1).strip() if match else ''
+        if not state_raw:
+            for v in CHHATTISGARH_VARIANTS:
+                m2 = re.search(rf'(?<!\w){re.escape(v)}(?!\w)', location, re.IGNORECASE)
+                if m2:
+                    state_raw = m2.group(0).title()
+                    break
+        p['state'] = state_raw
+
+        # District from Location cell
+        match = re.search(r'District\s*:\s*(.*)', location, re.DOTALL)
+        district_raw = ' '.join(match.group(1).split()) if match else ''
+        district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
+        p['district'] = district_raw
+
+        # Meeting date
+        p['meeting_date'] = m['meeting_date'].strip() if m['meeting_date'] else ''
+
+        # Proponent
+        p['proponent'] = ' '.join(m['proponent'].split()).strip()
 
         # State filter: only keep if state matches a Chhattisgarh variant
         state = p['state'].lower().replace('\n', ' ').strip()
@@ -331,8 +516,10 @@ class PariveshScraper:
             # Keyword matching on the cleaned text
             matched = [kw for kw, pat in self.keyword_patterns.items() if pat.search(cleaned_text.lower())]
 
-            # Parse proposals only if keywords matched
-            proposals = extract_proposals_from_text(cleaned_text) if matched else []
+            # Parse proposals — try table-based extraction first, fall back to text
+            proposals = extract_proposals_via_tables(resp.content) if matched else []
+            if not proposals and matched:
+                proposals = extract_proposals_from_text(cleaned_text)
             for prop in proposals:
                 prop['meeting_id'] = meeting_id
 
