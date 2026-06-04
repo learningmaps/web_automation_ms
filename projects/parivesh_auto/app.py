@@ -74,6 +74,27 @@ def load_consolidated_data(include_text=False):
         conn.close()
     return df
 
+def load_base_metrics():
+    """Query agenda_v3 directly for counts that should always be fresh (not from materialized view)."""
+    conn_string = get_secret("DATABASE_URL")
+    if not conn_string:
+        return {"unprocessed": 0, "keyword_matches": 0}
+    conn = psycopg2.connect(conn_string, port=6543)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE is_processed = 0 AND ref_type = 'AGENDA'")
+        unprocessed = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE matched_keywords IS NOT NULL AND ref_type = 'AGENDA'")
+        keyword_matches = cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Error loading base metrics: {e}")
+        unprocessed = 0
+        keyword_matches = 0
+    finally:
+        conn.close()
+    return {"unprocessed": unprocessed, "keyword_matches": keyword_matches}
+
+
 @st.cache_data(show_spinner="Fetching extracted proposals...")
 def load_proposals_data(limit=200):
     conn_string = get_secret("DATABASE_URL")
@@ -383,11 +404,12 @@ def run_parivesh():
                     filtered_df = filtered_df[(temp_proc >= start_date) & (temp_proc <= end_date)]
 
             # ─── METRICS ───
+            base_metrics = load_base_metrics()
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Viewing", len(filtered_df), delta=f"Total: {len(df)}")
             m2.metric("With MOM", len(filtered_df[filtered_df['mom_pdf_path'].notna()]))
-            m3.metric("Unprocessed", len(filtered_df[filtered_df['is_processed'] == 0]))
-            m4.metric("Keyword Matches", len(filtered_df[filtered_df['matched_keywords'].notna()]))
+            m3.metric("Unprocessed", base_metrics["unprocessed"])
+            m4.metric("Keyword Matches", base_metrics["keyword_matches"])
 
             # ─── MAIN CONSOLIDATED DATAFRAME ───
             st.markdown(f"### Consolidated Data (Agenda + MOM) ({len(filtered_df)})")
