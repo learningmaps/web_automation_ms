@@ -279,8 +279,11 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
             p['project_name'] = ''
 
         # Proposal For
-        match = re.search(r'Proposal\s+For\s*:\s*([^\n]+)', details)
-        p['proposal_for'] = match.group(1).strip() if match else ''
+        match = re.search(
+            r'Proposal\s+For\s*:\s*(.+?)(?=\n\s*(?:Activity|Sector|State)\s*:|\Z)',
+            details, re.DOTALL
+        )
+        p['proposal_for'] = ' '.join(match.group(1).split()) if match else ''
 
         # Activity
         match = re.search(
