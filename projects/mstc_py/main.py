@@ -35,6 +35,21 @@ def get_supabase() -> Client:
     key = os.getenv("SUPABASE_KEY")
     return create_client(url, key)
 
+def upload_pdf_to_storage(pdf_bytes: bytes, storage_path: str) -> str:
+    supabase = get_supabase()
+    bucket_name = "mstc-pdfs"
+    try:
+        supabase.storage.create_bucket(bucket_name, options={"public": True})
+    except Exception as e:
+        if "already exists" not in str(e).lower():
+            print(f"  !! Warning creating bucket: {e}")
+    supabase.storage.from_(bucket_name).upload(
+        path=storage_path,
+        file=pdf_bytes,
+        file_options={"content-type": "application/pdf", "x-upsert": "true"}
+    )
+    return supabase.storage.from_(bucket_name).get_public_url(storage_path)
+
 def fuzzy_match_block(extracted_name: str, blocks: list[dict]) -> dict | None:
     extracted_tokens = set(re.findall(r'\w+', extracted_name.lower()))
     best = None
@@ -173,7 +188,27 @@ def process_pending_pdfs(limit=10):
                     "summary": d.summary
                 }, on_conflict="pdf_id").execute()
 
-            # 4. Mark as Processed
+            # 4. Upload Chhattisgarh PDFs to Storage
+            state = None
+            if source == 'mine_block_summary':
+                state = d.state
+            elif source == 'nit':
+                state = d.blocks[0].state if d.blocks else None
+            elif source == 'corrigendum_addendum':
+                state = d.state
+
+            if state and "chhattisgarh" in state.lower():
+                s3_path = f"critical_minerals/{source}/chhattisgarh/{file_id}.pdf"
+                try:
+                    storage_url = upload_pdf_to_storage(pdf_bytes, s3_path)
+                    supabase.schema("mstc").table("processed_pdfs").update({
+                        "storage_url": storage_url
+                    }).eq("id", pdf['id']).execute()
+                    print(f"  -> Uploaded to storage: {storage_url}")
+                except Exception as e:
+                    print(f"  !! Storage upload failed (non-fatal): {e}")
+
+            # 5. Mark as Processed
             supabase.schema("mstc").table("processed_pdfs").update({
                 "status": "processed",
                 "extracted_at": datetime.now().isoformat()

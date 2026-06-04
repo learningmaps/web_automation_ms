@@ -29,3 +29,4 @@ KEYWORDS = [
 # Database Configuration
 DB_PATH = "parivesh.db"
 TABLE_NAME = "agenda_v3"
+PROPOSALS_TABLE_NAME = "extracted_proposals"

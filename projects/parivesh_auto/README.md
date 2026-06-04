@@ -14,7 +14,7 @@ An automated monitoring and data management system designed to track, process, a
 ## 🛠️ Tech Stack
 
 - **Frontend:** [Streamlit](https://streamlit.io/)
-- **Data Processing:** [Pandas](https://pandas.pydata.org/), [MarkItDown](https://github.com/microsoft/markitdown)
+- **Data Processing:** [Pandas](https://pandas.pydata.org/), [PyMuPDF](https://pymupdf.readthedocs.io/)
 - **Database:** PostgreSQL (Supabase)
 - **Concurrency:** Python `ThreadPoolExecutor`
 - **Networking:** `requests` with robust retry strategies

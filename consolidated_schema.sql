@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS mstc.processed_pdfs (
     pdf_url TEXT NOT NULL,
     discovered_at TIMESTAMPTZ DEFAULT NOW(),
     extracted_at TIMESTAMPTZ, -- Null until processed
-    status TEXT DEFAULT 'pending' -- 'pending', 'processed', or 'failed'
+    status TEXT DEFAULT 'pending', -- 'pending', 'processed', or 'failed'
+    storage_url TEXT -- Public URL in Supabase Storage (mstc-pdfs bucket)
 );
 
 -- 2. Table for Mine Block Summaries
@@ -113,6 +114,25 @@ CREATE TABLE IF NOT EXISTS parivesh.agenda_v3 (
     norm_subject TEXT
 );
 
+-- 2. Extracted Proposals Table (populated during PDF processing)
+CREATE TABLE IF NOT EXISTS parivesh.extracted_proposals (
+    id SERIAL PRIMARY KEY,
+    agenda_id BIGINT NOT NULL REFERENCES parivesh.agenda_v3(id),
+    sr_no INTEGER,
+    proposal_no TEXT,
+    file_no TEXT,
+    project_name TEXT,
+    proposal_for TEXT,
+    activity TEXT,
+    sector TEXT,
+    state TEXT,
+    district TEXT,
+    proponent TEXT,
+    meeting_date TEXT,
+    meeting_id TEXT,
+    created_on TIMESTAMP DEFAULT NOW()
+);
+
 -- ─── SECURITY (RLS) ───
 
 ALTER TABLE mstc.processed_pdfs ENABLE ROW LEVEL SECURITY;
@@ -120,6 +140,7 @@ ALTER TABLE mstc.mine_block_summaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mstc.tenders_nit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mstc.tender_blocks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE parivesh.agenda_v3 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parivesh.extracted_proposals ENABLE ROW LEVEL SECURITY;
 
 -- Secure Policies: Public can read, Service Role bypasses to write
 CREATE POLICY "Public Read Access" ON mstc.processed_pdfs FOR SELECT USING (true);
@@ -127,6 +148,7 @@ CREATE POLICY "Public Read Access" ON mstc.mine_block_summaries FOR SELECT USING
 CREATE POLICY "Public Read Access" ON mstc.tenders_nit FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON mstc.tender_blocks FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON parivesh.agenda_v3 FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON parivesh.extracted_proposals FOR SELECT USING (true);
 
 -- ─── BDC SCHEMA TABLES ───
 

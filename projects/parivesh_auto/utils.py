@@ -1,4 +1,3 @@
-import io
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 import re
@@ -17,8 +16,8 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from common.document_processing import convert_pdf_to_markdown
-from parivesh_auto.constants import KEYWORDS, TABLE_NAME
+from common.document_processing import extract_agenda_text
+from parivesh_auto.constants import KEYWORDS, TABLE_NAME, PROPOSALS_TABLE_NAME
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
@@ -41,6 +40,106 @@ STATE_MAPPING: Dict[int, str] = {
     5: "Uttarakhand", 9: "Uttar Pradesh", 19: "West Bengal"
 }
 
+CHHATTISGARH_VARIANTS = {
+    'chhattisgarh', 'chattisgarh', 'chhatisgarh', 'chatisgarh',
+    'chhattisghar', 'chattisghar',
+}
+
+
+def extract_proposals_from_text(text: str) -> list[dict]:
+    """
+    Parse cleaned agenda text and extract individual proposals.
+
+    Only returns proposals where the state is a Chhattisgarh variant.
+    Each proposal is identified by the 'Proposal No :' marker.
+    """
+    blocks = re.findall(
+        r'Proposal No\s*:\s*(.*?)(?=Proposal No\s*:|\Z)',
+        text, re.DOTALL
+    )
+
+    results = []
+    for idx, block in enumerate(blocks):
+        p: dict = {}
+
+        p['sr_no'] = idx + 1
+
+        # Proposal No (first line of block)
+        lines = block.strip().split('\n')
+        p['proposal_no'] = lines[0].strip() if lines else ''
+
+        # File No
+        m = re.search(r'File No\s*:\s*(.+)', block)
+        p['file_no'] = m.group(1).strip() if m else ''
+
+        # Project Name (stop at first of Proposal For or State — handles multi-page proposals)
+        m = re.search(
+            r'Project Name\s*:\s*(.+?)(?=\n\s*(?:Proposal\s+For|State)\s*:)',
+            block, re.DOTALL
+        )
+        if m:
+            p['project_name'] = ' '.join(m.group(1).split())
+            # Strip trailing standalone sr_no if present
+            p['project_name'] = re.sub(r'\s+\d+\s*$', '', p['project_name'])
+        else:
+            p['project_name'] = ''
+
+        # Proposal For
+        m = re.search(r'Proposal\s+For\s*:\s*(.+)', block)
+        p['proposal_for'] = m.group(1).strip() if m else ''
+
+        # Activity
+        m = re.search(r'Activity\s*:\s*(.+?)(?=\n\s*Sector\s*:)', block, re.DOTALL)
+        p['activity'] = ' '.join(m.group(1).split()) if m else ''
+
+        # Sector
+        m = re.search(r'Sector\s*:\s*(.+)', block)
+        p['sector'] = m.group(1).strip() if m else ''
+
+        # State (value may be on same line or next line)
+        m = re.search(r'State\s*:\s*(.*?)(?=\n\s*District\s*:)', block, re.DOTALL)
+        p['state'] = m.group(1).strip() if m else ''
+
+        # District (value may be on same line or next line)
+        m = re.search(r'District\s*:\s*(.*?)(?=\n\s*\d{2}/\d{2}/\d{4})', block, re.DOTALL)
+        p['district'] = ' '.join(m.group(1).split()) if m else ''
+
+        # Meeting date (dd/mm/yyyy)
+        m = re.search(r'(\d{2}/\d{2}/\d{4})', block)
+        p['meeting_date'] = m.group(1) if m else ''
+
+        # Proponent: text after meeting date, stopping at page footers,
+        #       Proposal For (same-proposal detail continuation), or next proposal marker.
+        m = re.search(r'\d{2}/\d{2}/\d{4}\s*\n', block)
+        if m:
+            after_date = block[m.end():]
+            proponent_lines = []
+            for line in after_date.split('\n'):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # Stop at known delimiters
+                if stripped.startswith('Proposal For:'):
+                    break
+                if stripped.startswith('Proposal No :'):
+                    break
+                if re.match(r'^(Page\s+\d+|Government of India|Ministry of Environment)', stripped, re.IGNORECASE):
+                    break
+                if re.match(r'^\d+$', stripped):
+                    break
+                proponent_lines.append(stripped)
+            p['proponent'] = ' '.join(proponent_lines)
+        else:
+            p['proponent'] = ''
+
+        # State filter: only keep if state matches a Chhattisgarh variant
+        state = p['state'].lower().replace('\n', ' ').strip()
+        if any(v in state for v in CHHATTISGARH_VARIANTS):
+            results.append(p)
+
+    return results
+
+
 class PariveshScraper:
     BASE_URL = "https://parivesh.nic.in"
     API_URL = f"{BASE_URL}/agendamom/getAgendaMomDocumentByCommitteeV2"
@@ -61,7 +160,8 @@ class PariveshScraper:
             for kw in self.keywords
         }
         self.table_name = f"parivesh.{table_name}"
-        
+        self.proposals_table = f"parivesh.{PROPOSALS_TABLE_NAME}"
+
         self.session = requests.Session()
         retry_strategy = Retry(
             total=5,
@@ -74,6 +174,7 @@ class PariveshScraper:
         self.session.mount("http://", adapter)
         
         self._create_table()
+        self._create_extracted_table()
 
     def _create_table(self) -> None:
         # Note: Unquoted identifiers in PostgreSQL become lowercase automatically.
@@ -89,6 +190,28 @@ class PariveshScraper:
                 is_active INTEGER, is_deleted INTEGER, is_processed INTEGER DEFAULT 0,
                 matched_keywords TEXT, processed_on TEXT, pdf_text TEXT,
                 norm_subject TEXT
+            )
+        """)
+        self.conn.commit()
+
+    def _create_extracted_table(self) -> None:
+        self.cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.proposals_table} (
+                id SERIAL PRIMARY KEY,
+                agenda_id BIGINT NOT NULL REFERENCES {self.table_name}(id),
+                sr_no INTEGER,
+                proposal_no TEXT,
+                file_no TEXT,
+                project_name TEXT,
+                proposal_for TEXT,
+                activity TEXT,
+                sector TEXT,
+                state TEXT,
+                district TEXT,
+                proponent TEXT,
+                meeting_date TEXT,
+                meeting_id TEXT,
+                created_on TIMESTAMP DEFAULT NOW()
             )
         """)
         self.conn.commit()
@@ -191,55 +314,50 @@ class PariveshScraper:
                     logger.error(f"Error in parallel fetch for {c} {r}: {e}")
                     yield f"Failed {c} - {r}", 0
 
-    def _download_and_extract_text(self, rec_id: int, pdfpath: str) -> Tuple[int, str, List[str], str]:
-        """Worker function for threads: Downloads, converts to Markdown, and matches keywords."""
+    def _download_and_extract_text(
+        self, rec_id: int, pdfpath: str, meeting_id: str
+    ) -> Tuple[int, str, List[str], List[dict], str]:
+        """Worker function for threads: Downloads, extracts text, matches keywords, and parses proposals."""
         try:
-            # Slight jitter/stagger to avoid perfectly simultaneous hits on the server
             time.sleep(0.1 * (rec_id % 10))
-            
+
             logger.debug(f"Downloading PDF for ID {rec_id}")
             resp = self.session.get(pdfpath, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             resp.raise_for_status()
 
-            # Use common utility for conversion
-            raw_text = convert_pdf_to_markdown(resp.content)
-            
-            # Cleaning logic
-            stop_patterns = ["List & Correspondence addresses", "Composition of Expert Appraisal Committee"]
-            lower_text = raw_text.lower()
-            stop_idx = len(raw_text)
-            for p in stop_patterns:
-                idx = lower_text.find(p.lower())
-                if idx != -1 and idx < stop_idx: stop_idx = idx
-            cleaned_text = raw_text[:stop_idx]
+            # Extract with built-in cut-off logic (Any Other Item(s) → Remarks → fallback)
+            cleaned_text = extract_agenda_text(resp.content)
 
-            # Matching on the Markdown text
+            # Keyword matching on the cleaned text
             matched = [kw for kw, pat in self.keyword_patterns.items() if pat.search(cleaned_text.lower())]
-            
-            return rec_id, cleaned_text, matched, "Success"
+
+            # Parse proposals only if keywords matched
+            proposals = extract_proposals_from_text(cleaned_text) if matched else []
+            for prop in proposals:
+                prop['meeting_id'] = meeting_id
+
+            return rec_id, cleaned_text, matched, proposals, "Success"
         except Exception as e:
             logger.warning(f"Failed to process PDF for ID {rec_id}: {e}")
-            return rec_id, "", [], f"Error: {str(e)}"
+            return rec_id, "", [], [], f"Error: {str(e)}"
 
     def process_pdfs_and_update(
         self, limit: int | None = None, max_workers: int | None = None
     ) -> Generator[Dict, None, None]:
         """Parallel processing of PDFs with batch updates. Dynamic worker count based on CPU."""
         if max_workers is None:
-            # Maximize CPU usage for the conversion work (CPU-bound)
-            # but keep it capped at 8 to be moderate with the network hits
             cpu_cores = os.cpu_count() or 4
             max_workers = min(cpu_cores, 8)
 
-        sql = f"SELECT id, pdffilepath FROM {self.table_name} WHERE is_processed = 0 AND ref_type = 'AGENDA'"
+        sql = f"SELECT id, pdffilepath, meeting_id FROM {self.table_name} WHERE is_processed = 0 AND ref_type = 'AGENDA'"
         if limit:
             self.cur.execute(sql + " LIMIT %s", (limit,))
         else:
             self.cur.execute(sql)
-        
+
         rows = self.cur.fetchall()
         total = len(rows)
-        if total == 0: 
+        if total == 0:
             logger.info("No pending PDFs to process.")
             return
 
@@ -255,25 +373,51 @@ class PariveshScraper:
             WHERE v.id = t.id
         """
 
-        results_batch = []
+        proposals_insert_sql = f"""
+            INSERT INTO {self.proposals_table}
+                (agenda_id, sr_no, proposal_no, file_no, project_name,
+                 proposal_for, activity, sector, state, district,
+                 proponent, meeting_date, meeting_id)
+            VALUES %s
+        """
+
+        agenda_batch = []
+        proposals_batch = []
         batch_size = 5
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_id = {executor.submit(self._download_and_extract_text, r["id"], r["pdffilepath"]): r["id"] for r in rows if r["pdffilepath"]}
-            
-            for i, future in enumerate(as_completed(future_to_id), 1):
-                rec_id, text, keywords, status = future.result()
+            future_map = {
+                executor.submit(
+                    self._download_and_extract_text, r["id"], r["pdffilepath"], r["meeting_id"]
+                ): r["id"] for r in rows if r["pdffilepath"]
+            }
+
+            for i, future in enumerate(as_completed(future_map), 1):
+                rec_id, text, keywords, proposals, status = future.result()
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                
+
                 if status == "Success":
-                    results_batch.append((rec_id, ",".join(keywords) if keywords else None, now, text))
-                
-                if len(results_batch) >= batch_size or i == total:
-                    if results_batch:
+                    kw_str = ",".join(keywords) if keywords else None
+                    agenda_batch.append((rec_id, kw_str, now, text))
+                    for prop in proposals:
+                        proposals_batch.append((
+                            rec_id, prop.get("sr_no"), prop.get("proposal_no"),
+                            prop.get("file_no"), prop.get("project_name"),
+                            prop.get("proposal_for"), prop.get("activity"),
+                            prop.get("sector"), prop.get("state"),
+                            prop.get("district"), prop.get("proponent"),
+                            prop.get("meeting_date"), prop.get("meeting_id"),
+                        ))
+
+                if len(agenda_batch) >= batch_size or i == total:
+                    if agenda_batch:
                         try:
-                            execute_values(self.cur, update_sql, results_batch)
+                            execute_values(self.cur, update_sql, agenda_batch)
+                            if proposals_batch:
+                                execute_values(self.cur, proposals_insert_sql, proposals_batch)
                             self.conn.commit()
-                            results_batch = []
+                            agenda_batch = []
+                            proposals_batch = []
                         except Exception as e:
                             self.conn.rollback()
                             logger.error(f"Batch update failed: {e}")

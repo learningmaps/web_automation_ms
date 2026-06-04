@@ -21,7 +21,7 @@
   ```
 
 ## Extraction Workflow
-- **Markdown Conversion**: Before sending data to the LLM for extraction, always convert PDFs to Markdown using `markitdown`.
+- **Text Extraction**: Before sending data to the LLM for extraction, always extract text from PDFs using `PyMuPDF` via `common.document_processing.convert_pdf_to_markdown`.
 - **Sequential Fallback Strategy**: The system attempts extraction using a tiered list of models to maximize reliability. If a model fails, it automatically falls back to the next one in the following order:
   1. `models/gemini-3.1-flash-lite` (Priority: High speed and stability)
   2. `models/gemini-2.5-flash` (Priority: Mature reliability)

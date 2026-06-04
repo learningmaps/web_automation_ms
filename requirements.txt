@@ -13,7 +13,7 @@ pydantic
 
 # PDF & Data Processing
 playwright
-markitdown[pdf]
+PyMuPDF
 beautifulsoup4
 lxml
 soupsieve

@@ -93,7 +93,7 @@ graph TD
 2. **Trigger**: Streamlit calls the GitHub API to dispatch the `extract_pdfs.yml` workflow with either `task: "both"` or `task: "extract"`.
 3. **Execution**: The workflow runs `projects/mstc_py/main.py`:
    - **Download**: Downloads the PDF from the stored URL.
-   - **Conversion**: `common.document_processing` uses `markitdown` to convert the PDF to Markdown.
+    - **Conversion**: `common.document_processing` uses `PyMuPDF` to extract text from the PDF.
    - **Extraction**: `extractor.py` sends the Markdown to **Gemini 3.1 Flash-Lite** with a structured Pydantic schema.
    - **Fallback**: If the primary model fails, it tries `Gemini 2.5 Flash`, then `Gemini 3 Flash-Preview`.
 4. **Storage**:
@@ -111,7 +111,7 @@ graph TD
 
 ### Stage 2: Document Processing & Consolidation
 1. **PDF Sync**: The scraper downloads the associated Agenda and MOM PDFs.
-2. **Keyword Matching**: Subject lines and PDF text are converted to Markdown using `markitdown` and scanned for specific monitoring keywords.
+2. **Keyword Matching**: Subject lines and PDF text are extracted using `PyMuPDF` and scanned for specific monitoring keywords.
 3. **Consolidation**: A PostgreSQL Materialized View (`parivesh.mv_consolidated_projects`) joins related Agendas and MOMs based on meeting IDs.
 4. **Visualization**: Streamlit fetches from this view to present a unified project timeline.
 
@@ -167,7 +167,7 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
   - `case_history`: Detailed logs of hearings, stages, and business history.
 
 ### Shared Logic
-- **`common/document_processing.py`**: Standardized PDF-to-Markdown conversion using the `markitdown` library.
+- **`common/document_processing.py`**: Standardized PDF-to-text extraction using `PyMuPDF`.
 - **`GEMINI.md`**: Project-wide mandates for extraction models, visual identity (Streamlit Red `#ff4b4b`), and directory structure.
 
 ### External Integrations

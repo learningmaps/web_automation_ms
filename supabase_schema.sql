@@ -6,7 +6,8 @@ CREATE TABLE processed_pdfs (
     pdf_url TEXT NOT NULL,
     discovered_at TIMESTAMPTZ DEFAULT NOW(),
     extracted_at TIMESTAMPTZ, -- Null until processed
-    status TEXT DEFAULT 'pending' -- 'pending', 'processed', or 'failed'
+    status TEXT DEFAULT 'pending', -- 'pending', 'processed', or 'failed'
+    storage_url TEXT -- Public URL in Supabase Storage (mstc-pdfs bucket)
 );
 
 -- 2. Table for Mine Block Summaries (Page 1)
