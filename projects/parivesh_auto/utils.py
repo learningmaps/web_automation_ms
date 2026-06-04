@@ -103,30 +103,34 @@ def extract_proposals_from_text(text: str) -> list[dict]:
 
         # --- State ---
         # Strategy 1: State: prefix with value before District:
-        m = re.search(r'State\s*:\s*(.*?)(?=\n\s*District\s*:)', block, re.DOTALL)
-        state_raw = m.group(1).strip() if m else ''
+        # Use LAST match to avoid embedded "State:" inside project names
+        m = re.findall(r'State\s*:\s*(.*?)(?=\n\s*District\s*:)', block, re.DOTALL)
+        state_raw = m[-1].strip() if m else ''
         # If regex grabbed garbage (has field labels), it matched wrong State:
-        if state_raw and re.search(r'(File No|Proposal\s+(?:No|For)|Project Name)', state_raw, re.IGNORECASE):
+        if state_raw and re.search(r'(File No|Proposal\s+(?:No|For)|Project Name|State\s*:|District\s*:)', state_raw, re.IGNORECASE):
             state_raw = ''
         # Strategy 2: no State: prefix — scan block for a CHHATTISGARH variant.
         # Handles column-layout PDFs where "State:" is on one page with empty
         # value and the actual state name appears later without prefix.
+        # Use LAST match to avoid matching state names embedded in project descriptions.
         if not state_raw:
+            all_matches = []
             for v in CHHATTISGARH_VARIANTS:
-                m2 = re.search(rf'(?<!\w){re.escape(v)}(?!\w)', block, re.IGNORECASE)
-                if m2:
-                    state_raw = m2.group(0).title()
-                    break
+                for m2 in re.finditer(rf'(?<!\w){re.escape(v)}(?!\w)', block, re.IGNORECASE):
+                    all_matches.append(m2)
+            if all_matches:
+                state_raw = all_matches[-1].group(0).upper()
         p['state'] = state_raw
 
         # --- District ---
-        # Strategy 1: normal District: prefix with value before a date
-        m = re.search(r'District\s*:\s*(.*?)(?=\n\s*\d{2}/\d{2}/\d{4})', block, re.DOTALL)
-        district_raw = ' '.join(m.group(1).split()) if m else ''
+        # Strategy 1: normal District: prefix with value before a date or blank line
+        # Negative lookahead prevents capturing other field labels (embedded in project names)
+        m = re.findall(r'District\s*:\s*((?:(?!\n\s*(?:State|District)\s*:).)*?)(?=\n\s*(?:\d{2}/\d{2}/\d{4}|\n))', block, re.DOTALL)
+        district_raw = ' '.join(m[-1].split()) if m else ''
         # Strip trailing standalone numbers (next proposal's sr_no bleeding in)
         if district_raw:
             district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
-        # Strategy 2: District: prefix without date lookahead
+        # Strategy 2: District: prefix without date/blank-line lookahead
         if not district_raw:
             m = re.search(r'District\s*:\s*(.+)', block)
             if m:
@@ -134,9 +138,10 @@ def extract_proposals_from_text(text: str) -> list[dict]:
                 district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
         p['district'] = district_raw
 
-        # Meeting date (dd/mm/yyyy)
-        m = re.search(r'(\d{2}/\d{2}/\d{4})', block)
-        p['meeting_date'] = m.group(1) if m else ''
+        # Meeting date (dd/mm/yyyy) — use last valid date to avoid false matches from file numbers
+        dates = re.findall(r'(\d{2}/\d{2}/\d{4})', block)
+        valid_dates = [d for d in dates if 1 <= int(d[3:5]) <= 12 and 1 <= int(d[0:2]) <= 31]
+        p['meeting_date'] = valid_dates[-1] if valid_dates else (dates[-1] if dates else '')
 
         # --- Proponent ---
         # Strategy: identify line-ranges belonging to known fields and skip them;

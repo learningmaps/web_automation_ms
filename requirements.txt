@@ -13,7 +13,7 @@ pydantic
 
 # PDF & Data Processing
 playwright
-PyMuPDF
+PyMuPDF>=1.27.0
 beautifulsoup4
 lxml
 soupsieve

@@ -36,7 +36,6 @@ def get_db_connection():
     return psycopg2.connect(conn_string, port=6543)
 
 # ─── DATA ENGINE ───
-@st.cache_data(show_spinner="Fetching fresh data from Supabase...")
 def load_consolidated_data(include_text=False):
     conn_string = get_secret("DATABASE_URL")
     if not conn_string:
@@ -95,7 +94,6 @@ def load_base_metrics():
     return {"unprocessed": unprocessed, "keyword_matches": keyword_matches}
 
 
-@st.cache_data(show_spinner="Fetching extracted proposals...")
 def load_proposals_data(limit=200):
     conn_string = get_secret("DATABASE_URL")
     if not conn_string:
@@ -133,7 +131,6 @@ def refresh_materialized_view():
         cur.execute("SET statement_timeout = '300s'")
         cur.execute("REFRESH MATERIALIZED VIEW parivesh.mv_consolidated_projects")
         conn.commit()
-        st.cache_data.clear() # Clear cache so app pulls fresh data
         st.success("Database View Refreshed!")
     except Exception as e:
         st.error("Failed to refresh materialized view (Database Timeout).")
@@ -219,7 +216,6 @@ def run_parivesh():
     # ─── SIDEBAR DIAGNOSTICS ───
     with st.sidebar:
         st.header("Settings & Data")
-        # include_text change will naturally trigger a cache re-run because it's an argument
         include_text = st.checkbox("Include PDF Text", value=False, help="Loading text data increases load time significantly.")
         
         st.divider()
@@ -246,9 +242,7 @@ def run_parivesh():
                 st.error("Diagnostics failed.")
                 st.exception(e)
         
-        if st.button("Clear App Cache & Rerun", help="Clears temporary session data and restarts the application flow."):
-            st.cache_data.clear()
-            st.rerun()
+
 
     # ─── HEADER SECTION ───
     col1, col2 = st.columns([1.2, 2])
@@ -313,7 +307,7 @@ def run_parivesh():
                     
                     scraper.close()
                     status.write("Finalizing view...")
-                    refresh_materialized_view() # This also clears cache
+                    refresh_materialized_view()
                     
                     # Display Stats
                     st.session_state.last_sync_stats = {
