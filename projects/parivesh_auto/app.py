@@ -74,6 +74,36 @@ def load_consolidated_data(include_text=False):
         conn.close()
     return df
 
+@st.cache_data(show_spinner="Fetching extracted proposals...")
+def load_proposals_data(limit=200):
+    conn_string = get_secret("DATABASE_URL")
+    if not conn_string:
+        return pd.DataFrame()
+    conn = psycopg2.connect(conn_string, port=6543)
+    query = """
+        SELECT
+            p.id, p.sr_no, p.proposal_no, p.file_no,
+            p.project_name, p.proposal_for, p.sector,
+            p.state, p.district, p.proponent,
+            p.meeting_date, p.meeting_id, p.created_on,
+            a.pdffilepath AS agenda_pdf_path,
+            a.norm_subject, a.committee_type
+        FROM parivesh.extracted_proposals p
+        JOIN parivesh.agenda_v3 a ON p.agenda_id = a.id
+        ORDER BY p.created_on DESC, p.sr_no
+        LIMIT %s
+    """
+    try:
+        df = pd.read_sql_query(query, conn, params=[limit])
+        if not df.empty:
+            df['id'] = df['id'].astype(str)
+    except Exception as e:
+        logger.error(f"Error loading proposals: {e}")
+        df = pd.DataFrame()
+    finally:
+        conn.close()
+    return df
+
 def refresh_materialized_view():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -123,7 +153,7 @@ def run_parivesh():
         sys.path.insert(0, parent_dir)
         
     from parivesh_auto.utils import PariveshScraper
-    from parivesh_auto.constants import KEYWORDS, TABLE_NAME
+    from parivesh_auto.constants import KEYWORDS, TABLE_NAME, PROPOSALS_TABLE_NAME
 
     # ─── STYLING ───
     st.markdown("""
@@ -187,6 +217,9 @@ def run_parivesh():
                 st.write("Distribution:")
                 for r, c in ref_counts:
                     st.write(f"- {r}: {c}")
+                proposals_table = f"parivesh.{PROPOSALS_TABLE_NAME}"
+                cur.execute(f"SELECT COUNT(*) FROM {proposals_table}")
+                st.write(f"Proposals in `{proposals_table}`: **{cur.fetchone()[0]}**")
                 conn.close()
             except Exception as e:
                 st.error("Diagnostics failed.")
@@ -420,6 +453,63 @@ def run_parivesh():
                 use_container_width=True,
                 help="Saves the currently filtered results into an Excel (.xlsx) file for offline analysis."
             )
+
+            # ─── PROPOSALS SECTION ───
+            st.divider()
+            st.markdown("### Extracted Proposals")
+
+            proposals_df = load_proposals_data()
+
+            if proposals_df.empty:
+                st.info("No extracted proposals found. Process PDFs via 'Fetch New Documents' to generate proposals.")
+            else:
+                p1, p2 = st.columns([1, 3])
+                with p1:
+                    state_filter = st.multiselect(
+                        "State", options=sorted(proposals_df['state'].dropna().unique()),
+                        key="prop_state"
+                    )
+                with p2:
+                    sector_filter = st.multiselect(
+                        "Sector", options=sorted(proposals_df['sector'].dropna().unique()),
+                        key="prop_sector"
+                    )
+
+                filtered_proposals = proposals_df.copy()
+                if state_filter:
+                    filtered_proposals = filtered_proposals[filtered_proposals['state'].isin(state_filter)]
+                if sector_filter:
+                    filtered_proposals = filtered_proposals[filtered_proposals['sector'].isin(sector_filter)]
+
+                st.metric("Proposals", len(filtered_proposals), delta=f"Total: {len(proposals_df)}")
+
+                prop_col_config = {
+                    "id": None,
+                    "sr_no": st.column_config.NumberColumn("S.No", width="small"),
+                    "proposal_no": st.column_config.TextColumn("Proposal No"),
+                    "file_no": st.column_config.TextColumn("File No"),
+                    "project_name": st.column_config.TextColumn("Project Name"),
+                    "proposal_for": st.column_config.TextColumn("Proposal For"),
+                    "sector": st.column_config.TextColumn("Sector"),
+                    "state": st.column_config.TextColumn("State"),
+                    "district": st.column_config.TextColumn("District"),
+                    "proponent": st.column_config.TextColumn("Proponent"),
+                    "committee_type": st.column_config.TextColumn("Committee"),
+                    "agenda_pdf_path": st.column_config.LinkColumn("Agenda PDF"),
+                    "norm_subject": st.column_config.TextColumn("Agenda Subject", width="medium"),
+                    "meeting_date": st.column_config.TextColumn("Meeting Date"),
+                    "created_on": st.column_config.DatetimeColumn("Extracted On", format="DD-MM-YYYY HH:mm"),
+                    "meeting_id": None,
+                }
+
+                st.dataframe(
+                    filtered_proposals,
+                    use_container_width=True,
+                    height=500,
+                    column_config=prop_col_config,
+                    hide_index=True,
+                    key="proposals_table"
+                )
 
     except Exception as e:
         st.error("A critical error occurred in the application UI.")
