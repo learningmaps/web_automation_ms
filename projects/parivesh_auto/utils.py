@@ -123,16 +123,16 @@ def extract_proposals_from_text(text: str) -> list[dict]:
         p['state'] = state_raw
 
         # --- District ---
-        # Strategy 1: normal District: prefix with value before a date or blank line
+        # Strategy 1: normal District: prefix with value before a date, blank line, or trailing number
         # Negative lookahead prevents capturing other field labels (embedded in project names)
-        m = re.findall(r'District\s*:\s*((?:(?!\n\s*(?:State|District)\s*:).)*?)(?=\n\s*(?:\d{2}/\d{2}/\d{4}|\n))', block, re.DOTALL)
+        m = re.findall(r'District\s*:\s*((?:(?!\n\s*(?:State|District)\s*:).)*?)(?=\n\s*(?:\d{2}/\d{2}/\d{4}|\n|\d+\s*(?:\n|$))|$)', block, re.DOTALL)
         district_raw = ' '.join(m[-1].split()) if m else ''
         # Strip trailing standalone numbers (next proposal's sr_no bleeding in)
         if district_raw:
             district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
         # Strategy 2: District: prefix without date/blank-line lookahead
         if not district_raw:
-            m = re.search(r'District\s*:\s*(.+)', block)
+            m = re.search(r'District\s*:\s*(.+)', block, re.DOTALL)
             if m:
                 district_raw = ' '.join(m.group(1).split())
                 district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
