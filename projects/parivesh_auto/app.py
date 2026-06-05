@@ -479,23 +479,60 @@ def run_parivesh():
             if proposals_df.empty:
                 st.info("No extracted proposals found. Process PDFs via 'Fetch New Documents' to generate proposals.")
             else:
-                p1, p2 = st.columns([1, 3])
-                with p1:
+                pc1, pc2, pc3, pc4 = st.columns(4)
+                with pc1:
                     state_filter = st.multiselect(
                         "State", options=sorted(proposals_df['state'].dropna().unique()),
                         key="prop_state"
                     )
-                with p2:
+                with pc2:
                     sector_filter = st.multiselect(
                         "Sector", options=sorted(proposals_df['sector'].dropna().unique()),
                         key="prop_sector"
                     )
+                with pc3:
+                    proposal_for_filter = st.multiselect(
+                        "Proposal For", options=sorted(proposals_df['proposal_for'].dropna().unique()),
+                        key="prop_proposal_for"
+                    )
+                with pc4:
+                    committee_filter = st.multiselect(
+                        "Committee", options=sorted(proposals_df['committee_type'].dropna().unique()),
+                        key="prop_committee"
+                    )
+
+                pd1, pd2, pd3, pd4 = st.columns(4)
+                with pd1:
+                    district_filter = st.multiselect(
+                        "District", options=sorted(proposals_df['district'].dropna().unique()),
+                        key="prop_district"
+                    )
+                with pd2:
+                    proponent_search = st.text_input("Search Proponent", placeholder="Type name...", key="prop_proponent")
+                with pd3:
+                    proposal_search = st.text_input("Search Proposal No", placeholder="e.g. IA/CG/...", key="prop_proposal_no")
+                with pd4:
+                    meeting_date_range = st.date_input("Meeting Date Range", value=[], key="prop_meeting_date")
 
                 filtered_proposals = proposals_df.copy()
                 if state_filter:
                     filtered_proposals = filtered_proposals[filtered_proposals['state'].isin(state_filter)]
                 if sector_filter:
                     filtered_proposals = filtered_proposals[filtered_proposals['sector'].isin(sector_filter)]
+                if proposal_for_filter:
+                    filtered_proposals = filtered_proposals[filtered_proposals['proposal_for'].isin(proposal_for_filter)]
+                if committee_filter:
+                    filtered_proposals = filtered_proposals[filtered_proposals['committee_type'].isin(committee_filter)]
+                if district_filter:
+                    filtered_proposals = filtered_proposals[filtered_proposals['district'].isin(district_filter)]
+                if proponent_search:
+                    filtered_proposals = filtered_proposals[filtered_proposals['proponent'].str.contains(proponent_search, case=False, na=False)]
+                if proposal_search:
+                    filtered_proposals = filtered_proposals[filtered_proposals['proposal_no'].str.contains(proposal_search, case=False, na=False)]
+                if len(meeting_date_range) == 2:
+                    start_date, end_date = meeting_date_range
+                    temp_dates = pd.to_datetime(filtered_proposals['meeting_date'], errors='coerce').dt.date
+                    filtered_proposals = filtered_proposals[(temp_dates >= start_date) & (temp_dates <= end_date)]
 
                 st.metric("Proposals", len(filtered_proposals), delta=f"Total: {len(proposals_df)}")
 
