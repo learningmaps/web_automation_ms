@@ -375,16 +375,28 @@ def run_mstc():
     with tab4:
         st.subheader("Corrigendum & Addendum")
         corr_resp = supabase.schema("mstc").table("corrigendum_blocks") \
-            .select("*, corrigendum_addendum!inner(document_date, summary, pdf_id, processed_pdfs(discovered_at, file_id, pdf_url))") \
+            .select("*, corrigendum_addendum!inner(document_date, summary, pdf_id)") \
             .order("corrigendum_id", desc=True) \
             .execute()
         if corr_resp.data:
             df_corr = pd.DataFrame(corr_resp.data)
 
-            # Clean column names (joins may be flat dot-notation or nested depending on client version)
+            # Flatten dot-notation column names
             df_corr.columns = [c.split('.')[-1] for c in df_corr.columns]
-            # Deduplicate identical column names
             df_corr = df_corr.loc[:, ~df_corr.columns.duplicated()]
+
+            # Fetch processed_pdfs separately and merge
+            pdf_col = 'pdf_id' if 'pdf_id' in df_corr.columns else None
+            if pdf_col:
+                pdf_ids = df_corr[pdf_col].dropna().unique().tolist()
+                if pdf_ids:
+                    pdfs_resp = supabase.schema("mstc").table("processed_pdfs") \
+                        .select("id, discovered_at, file_id, pdf_url") \
+                        .in_("id", pdf_ids) \
+                        .execute()
+                    if pdfs_resp.data:
+                        pdfs_df = pd.DataFrame(pdfs_resp.data).rename(columns={"id": "pdf_id"})
+                        df_corr = df_corr.merge(pdfs_df, on="pdf_id", how="left")
 
             f1, f2 = st.columns(2)
             with f1:
@@ -401,10 +413,11 @@ def run_mstc():
                 mask &= df_corr['district'].isin(sel_districts)
 
             df_filtered = df_corr[mask].copy()
-            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'change_summary']
-            drop_cols = ['id', 'corrigendum_id', 'pdf_id']
-            other_cols = [c for c in df_filtered.columns if c not in req_cols and c not in drop_cols]
-            df_filtered = df_filtered[req_cols + other_cols]
+            cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'change_summary']
+            existing_cols = [c for c in cols if c in df_filtered.columns]
+            drop_cols = [c for c in ['id', 'corrigendum_id', 'pdf_id'] if c in df_filtered.columns]
+            other_cols = [c for c in df_filtered.columns if c not in existing_cols and c not in drop_cols]
+            df_filtered = df_filtered[existing_cols + other_cols]
 
             st.dataframe(
                 df_filtered,
