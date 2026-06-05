@@ -418,6 +418,49 @@ def merge_page_boundaries(pdf_content: bytes) -> str:
     return '\n'.join(page_texts)
 
 
+def truncate_pdf(pdf_content: bytes) -> bytes:
+    """
+    Remove content from a PDF below the first matching cutoff pattern.
+    Uses coordinate-based block detection for all stop patterns in priority order.
+    If no pattern is found via coordinates, returns the original content unchanged.
+    """
+    doc = fitz.open(stream=pdf_content, filetype="pdf")
+
+    stop_patterns = [
+        "Any Other Item(s)",
+        "Remarks",
+        "List & Correspondence addresses",
+        "Composition of Expert Appraisal Committee",
+    ]
+
+    best_page = None
+    best_y = None
+    for i, page in enumerate(doc):
+        for b in page.get_text("blocks"):
+            for pat in stop_patterns:
+                if pat.lower() in b[4].lower():
+                    if best_page is None or i < best_page or (i == best_page and b[1] < best_y):
+                        best_page, best_y = i, b[1]
+                    break
+
+    if best_page is None:
+        doc.close()
+        return pdf_content
+
+    # Keep pages up to and including the cutoff page
+    doc.select(list(range(best_page + 1)))
+
+    # Redact content below cutoff on the last page
+    page = doc[-1]
+    rect = fitz.Rect(0, best_y, page.rect.x1, page.rect.y1)
+    page.add_redact_annot(rect)
+    page.apply_redactions()
+
+    result = doc.tobytes()
+    doc.close()
+    return result
+
+
 def extract_agenda_text(pdf_content: bytes) -> str:
     """
     Extract text from an agenda/meeting PDF, cutting off at the first of:
@@ -670,19 +713,21 @@ class PariveshScraper:
             resp = self.session.get(pdfpath, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             resp.raise_for_status()
 
-            # Extract with built-in cut-off logic (Any Other Item(s) → Remarks → fallback)
-            cleaned_text = extract_agenda_text(resp.content)
+            # Truncate the PDF to remove content below the first cutoff marker
+            truncated_pdf = truncate_pdf(resp.content)
+
+            # Extract clean text for keyword matching
+            cleaned_text = extract_agenda_text(truncated_pdf)
 
             # Keyword matching on the cleaned text
             matched = [kw for kw, pat in self.keyword_patterns.items() if pat.search(cleaned_text.lower())]
 
             # Parse proposals — try table-based extraction first, fall back to text
-            proposals = extract_proposals_via_tables(resp.content) if matched else []
+            proposals = extract_proposals_via_tables(truncated_pdf) if matched else []
             if not proposals and matched:
-                # Merge page-split rows, then apply same text-level cut-offs as
-                # extract_agenda_text does (Remarks, Any Other Item(s), and legacy stop patterns)
-                merged = merge_page_boundaries(resp.content)
-                for sep in ['Remarks', 'List & Correspondence addresses',
+                # Merge page-split rows, then apply text-level cut-offs for safety
+                merged = merge_page_boundaries(truncated_pdf)
+                for sep in ['Any Other Item(s)', 'Remarks', 'List & Correspondence addresses',
                             'Composition of Expert Appraisal Committee']:
                     idx = merged.lower().find(sep.lower())
                     if idx != -1:
