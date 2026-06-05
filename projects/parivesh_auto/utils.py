@@ -333,6 +333,92 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
     return results
 
 
+def _group_blocks_by_row(blocks):
+    """Group text blocks into table rows based on overlapping y-ranges."""
+    if not blocks:
+        return []
+
+    sorted_blocks = sorted(blocks, key=lambda b: b[1])
+    groups = []
+    current_group = [sorted_blocks[0]]
+    current_y1 = sorted_blocks[0][3]
+
+    for b in sorted_blocks[1:]:
+        y0, y1 = b[1], b[3]
+        if y0 < current_y1:
+            current_group.append(b)
+            current_y1 = max(current_y1, y1)
+        else:
+            groups.append(current_group)
+            current_group = [b]
+            current_y1 = y1
+
+    if current_group:
+        groups.append(current_group)
+    return groups
+
+
+def _cut_page_at_new_row(text: str) -> tuple[str, str]:
+    """
+    Split page text into (continuation, main) at the first new-row marker.
+    A new row starts with a standalone serial number or 'Proposal No :'.
+    """
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if re.match(r'^\d+$', stripped) or stripped.startswith('Proposal No'):
+            return '\n'.join(lines[:i]), '\n'.join(lines[i:])
+    return '', text
+
+
+def _has_sr_no(group):
+    return any(
+        b[4].strip().isdigit() and (b[2] - b[0]) < 80
+        for b in group
+    )
+
+
+def merge_page_boundaries(pdf_content: bytes) -> str:
+    """
+    Detect and merge table rows split across page boundaries.
+
+    Uses page.get_text("blocks") position info to detect whether a page
+    starts with continuation blocks (no sr_no at the top).  If so, the
+    corresponding lines in the page's get_text() are moved to the end of
+    the previous page's text so that split rows remain contiguous.
+    """
+    doc = fitz.open(stream=pdf_content, filetype="pdf")
+
+    page_texts: list[str] = []
+
+    for page_idx in range(len(doc)):
+        page = doc[page_idx]
+        text = page.get_text()
+        blocks = page.get_text("blocks")
+
+        content = [
+            b for b in blocks
+            if b[4].strip() and not re.match(r'^Page \d+ of \d+', b[4].strip())
+        ]
+
+        if page_idx == 0 or not content:
+            page_texts.append(text)
+            continue
+
+        groups = _group_blocks_by_row(content)
+
+        if _has_sr_no(groups[0]):
+            page_texts.append(text)
+        else:
+            cont_lines, main_lines = _cut_page_at_new_row(text)
+            if cont_lines:
+                page_texts[-1] += '\n' + cont_lines
+            page_texts.append(main_lines)
+
+    doc.close()
+    return '\n'.join(page_texts)
+
+
 class PariveshScraper:
     BASE_URL = "https://parivesh.nic.in"
     API_URL = f"{BASE_URL}/agendamom/getAgendaMomDocumentByCommitteeV2"
@@ -527,7 +613,15 @@ class PariveshScraper:
             # Parse proposals — try table-based extraction first, fall back to text
             proposals = extract_proposals_via_tables(resp.content) if matched else []
             if not proposals and matched:
-                proposals = extract_proposals_from_text(cleaned_text)
+                # Merge page-split rows, then apply same text-level cut-offs as
+                # extract_agenda_text (Remarks and legacy stop patterns)
+                merged = merge_page_boundaries(resp.content)
+                for sep in ['Remarks', 'List & Correspondence addresses',
+                            'Composition of Expert Appraisal Committee']:
+                    idx = merged.lower().find(sep.lower())
+                    if idx != -1:
+                        merged = merged[:idx]
+                proposals = extract_proposals_from_text(merged.strip())
             for prop in proposals:
                 prop['meeting_id'] = meeting_id
 
