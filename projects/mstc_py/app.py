@@ -374,62 +374,114 @@ def run_mstc():
 
     with tab4:
         st.subheader("Corrigendum & Addendum")
-        corr_resp = supabase.schema("mstc").table("corrigendum_blocks") \
-            .select("*, corrigendum_addendum!inner(document_date, summary, pdf_id)") \
-            .order("corrigendum_id", desc=True) \
+
+        # 1. Fetch parent documents with PDF metadata
+        parents_resp = supabase.schema("mstc").table("corrigendum_addendum") \
+            .select("*, processed_pdfs!inner(discovered_at, file_id, pdf_url)") \
+            .order("document_date", desc=True, nullsfirst=False) \
             .execute()
-        if corr_resp.data:
-            df_corr = pd.DataFrame(corr_resp.data)
 
-            # Flatten dot-notation column names
-            df_corr.columns = [c.split('.')[-1] for c in df_corr.columns]
-            df_corr = df_corr.loc[:, ~df_corr.columns.duplicated()]
-
-            # Fetch processed_pdfs separately and merge
-            pdf_col = 'pdf_id' if 'pdf_id' in df_corr.columns else None
-            if pdf_col:
-                pdf_ids = df_corr[pdf_col].dropna().unique().tolist()
-                if pdf_ids:
-                    pdfs_resp = supabase.schema("mstc").table("processed_pdfs") \
-                        .select("id, discovered_at, file_id, pdf_url") \
-                        .in_("id", pdf_ids) \
-                        .execute()
-                    if pdfs_resp.data:
-                        pdfs_df = pd.DataFrame(pdfs_resp.data).rename(columns={"id": "pdf_id"})
-                        df_corr = df_corr.merge(pdfs_df, on="pdf_id", how="left")
-
-            f1, f2 = st.columns(2)
-            with f1:
-                states = sorted(df_corr['state'].dropna().unique().tolist())
-                sel_states = st.multiselect("Filter by State", states, placeholder="All States", key="corr_state")
-            with f2:
-                districts = sorted(df_corr['district'].dropna().unique().tolist())
-                sel_districts = st.multiselect("Filter by District", districts, placeholder="All Districts", key="corr_district")
-
-            mask = pd.Series([True] * len(df_corr))
-            if sel_states:
-                mask &= df_corr['state'].isin(sel_states)
-            if sel_districts:
-                mask &= df_corr['district'].isin(sel_districts)
-
-            df_filtered = df_corr[mask].copy()
-            cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'change_summary']
-            existing_cols = [c for c in cols if c in df_filtered.columns]
-            drop_cols = [c for c in ['id', 'corrigendum_id', 'pdf_id'] if c in df_filtered.columns]
-            other_cols = [c for c in df_filtered.columns if c not in existing_cols and c not in drop_cols]
-            df_filtered = df_filtered[existing_cols + other_cols]
-
-            st.dataframe(
-                df_filtered,
-                use_container_width=True,
-                column_config={
-                    "pdf_url": st.column_config.LinkColumn("PDF Link"),
-                    "change_summary": st.column_config.TextColumn("Change Summary", help="Per-block change details"),
-                    "block_name": st.column_config.TextColumn("Block Name"),
-                }
-            )
-        else:
+        if not parents_resp.data:
             st.info("No corrigendum data extracted yet.")
+        else:
+            # Flatten parent DF (handles dot-notation or nested)
+            df_parents = pd.DataFrame(parents_resp.data)
+            df_parents.columns = [c.split('.')[-1] for c in df_parents.columns]
+            df_parents = df_parents.loc[:, ~df_parents.columns.duplicated()]
+
+            # 2. Fetch all child blocks for these parents
+            parent_ids = df_parents['id'].tolist()
+            blocks_resp = supabase.schema("mstc").table("corrigendum_blocks") \
+                .select("*") \
+                .in_("corrigendum_id", parent_ids) \
+                .execute()
+
+            # Group blocks by corrigendum_id
+            blocks_by_parent = {}
+            if blocks_resp.data:
+                for b in blocks_resp.data:
+                    blocks_by_parent.setdefault(b['corrigendum_id'], []).append(b)
+
+            # 3. Filters row
+            all_blocks = blocks_resp.data or []
+            if all_blocks:
+                df_blocks_all = pd.DataFrame(all_blocks)
+                f1, f2, f3, f4 = st.columns(4)
+                with f1:
+                    states = sorted(s for s in df_blocks_all['state'].dropna().unique() if s)
+                    sel_states = st.multiselect("State", states, placeholder="All", key="corr_state")
+                with f2:
+                    districts = sorted(s for s in df_blocks_all['district'].dropna().unique() if s)
+                    sel_districts = st.multiselect("District", districts, placeholder="All", key="corr_district")
+                with f3:
+                    sel_search = st.text_input("Search Block", placeholder="Type block name...", key="corr_search")
+                with f4:
+                    total_docs = len(parents_resp.data)
+                    total_blocks = len(all_blocks)
+                    st.markdown(f"**{total_docs}** docs · **{total_blocks}** blocks")
+            else:
+                sel_states, sel_districts, sel_search = [], [], ""
+
+            # 4. Render cards
+            cards_shown = 0
+            for _, parent in df_parents.iterrows():
+                parent_blocks = blocks_by_parent.get(parent['id'], [])
+                if not parent_blocks:
+                    continue
+
+                # Apply filters to blocks
+                filtered = parent_blocks
+                if sel_states:
+                    filtered = [b for b in filtered if b.get('state') in sel_states]
+                if sel_districts:
+                    filtered = [b for b in filtered if b.get('district') in sel_districts]
+                if sel_search:
+                    q = sel_search.lower()
+                    filtered = [b for b in filtered if q in (b.get('block_name', '') or '').lower()]
+
+                if not filtered:
+                    continue
+
+                cards_shown += 1
+
+                # Collect unique states for this doc
+                doc_states = sorted(set(
+                    b.get('state', '') for b in filtered if b.get('state')
+                ))
+                state_badge = f"📌 {', '.join(doc_states)}" if doc_states else ""
+
+                # Expanded if only 1 block shown, else collapsed
+                expanded = len(filtered) <= 1
+                label = f"{parent.get('document_date', '?')}  ·  {parent.get('file_id', '?')}  ·  {len(filtered)} block(s)"
+                if state_badge:
+                    label += f"  {state_badge}"
+
+                with st.expander(label, expanded=expanded):
+                    col_left, col_right = st.columns([3, 1])
+                    with col_left:
+                        summary = parent.get('summary', '') or '(no summary)'
+                        st.caption(summary)
+                    with col_right:
+                        pdf_url = parent.get('pdf_url', '')
+                        if pdf_url:
+                            st.link_button("📄 View PDF", pdf_url, use_container_width=True)
+
+                    # Blocks table inside the card
+                    blocks_df = pd.DataFrame(filtered)
+                    display_cols = ['block_name', 'state', 'district', 'change_summary']
+                    existing = [c for c in display_cols if c in blocks_df.columns]
+                    st.dataframe(
+                        blocks_df[existing],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "change_summary": st.column_config.TextColumn("Change", width="large"),
+                            "block_name": st.column_config.TextColumn("Block Name", width="medium"),
+                        }
+                    )
+
+            if cards_shown == 0:
+                st.info("No documents match the current filters.")
 
     st.divider()
     st.caption("Data is synced live from Supabase. Backend runs on GitHub Actions.")
