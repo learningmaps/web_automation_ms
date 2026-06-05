@@ -174,39 +174,58 @@ def process_pending_pdfs(limit=10):
 
             elif source == 'corrigendum_addendum':
                 d = extracted_data
+                # Fuzzy match each block against known mine block summaries
                 blocks_cache = supabase.schema("mstc").table("mine_block_summaries").select("block_name, state, district").execute()
-                match = fuzzy_match_block(d.blockName, blocks_cache.data)
-                if match:
-                    d.state = match['state'] or d.state
-                    d.district = match['district'] or d.district
-                supabase.schema("mstc").table("corrigendum_addendum").upsert({
+                for block in d.blocks:
+                    match = fuzzy_match_block(block.blockName, blocks_cache.data)
+                    if match:
+                        block.state = match['state'] or block.state
+                        block.district = match['district'] or block.district
+                # Upsert parent row
+                parent_resp = supabase.schema("mstc").table("corrigendum_addendum").upsert({
                     "pdf_id": pdf['id'],
-                    "block_name": d.blockName,
                     "document_date": normalize_timestamp(d.documentDate),
-                    "state": d.state,
-                    "district": d.district,
                     "summary": d.summary
                 }, on_conflict="pdf_id").execute()
+                parent_id = parent_resp.data[0]['id']
+                # Clear old child blocks (clean slate for re-extracts)
+                supabase.schema("mstc").table("corrigendum_blocks").delete().eq("corrigendum_id", parent_id).execute()
+                # Insert new child blocks
+                if d.blocks:
+                    blocks_to_insert = [{
+                        "corrigendum_id": parent_id,
+                        "block_name": b.blockName,
+                        "state": b.state,
+                        "district": b.district,
+                        "change_summary": b.changeSummary
+                    } for b in d.blocks]
+                    supabase.schema("mstc").table("corrigendum_blocks").insert(blocks_to_insert).execute()
 
             # 4. Upload Chhattisgarh PDFs to Storage
-            state = None
+            is_cg = False
             if source == 'mine_block_summary':
-                state = d.state
+                is_cg = d.state and "chhattisgarh" in d.state.lower()
             elif source == 'nit':
-                state = d.blocks[0].state if d.blocks else None
+                is_cg = any(b.state and "chhattisgarh" in b.state.lower() for b in (d.blocks or []))
             elif source == 'corrigendum_addendum':
-                state = d.state
+                is_cg = any(b.state and "chhattisgarh" in b.state.lower() for b in d.blocks)
 
-            if state and "chhattisgarh" in state.lower():
+            if is_cg:
                 s3_path = f"critical_minerals/{source}/chhattisgarh/{file_id}.pdf"
-                try:
-                    storage_url = upload_pdf_to_storage(pdf_bytes, s3_path)
-                    supabase.schema("mstc").table("processed_pdfs").update({
-                        "storage_url": storage_url
-                    }).eq("id", pdf['id']).execute()
-                    print(f"  -> Uploaded to storage: {storage_url}")
-                except Exception as e:
-                    print(f"  !! Storage upload failed (non-fatal): {e}")
+                # Check if already uploaded
+                existing = supabase.schema("mstc").table("processed_pdfs").select("storage_url").eq("id", pdf['id']).execute()
+                if existing.data and existing.data[0].get('storage_url'):
+                    storage_url = existing.data[0]['storage_url']
+                    print(f"  -> Already in storage: {storage_url}")
+                else:
+                    try:
+                        storage_url = upload_pdf_to_storage(pdf_bytes, s3_path)
+                        supabase.schema("mstc").table("processed_pdfs").update({
+                            "storage_url": storage_url
+                        }).eq("id", pdf['id']).execute()
+                        print(f"  -> Uploaded to storage: {storage_url}")
+                    except Exception as e:
+                        print(f"  !! Storage upload failed (non-fatal): {e}")
 
             # 5. Mark as Processed
             supabase.schema("mstc").table("processed_pdfs").update({

@@ -47,12 +47,16 @@ class NIT(BaseModel):
     blocks: List[TenderBlock] = Field(description="The complete list of mineral blocks listed in the auction table")
 
 # 3. Corrigendum and Addendum Schema
+class CorrigendumBlock(BaseModel):
+    blockName: str = Field(description="Name of the mineral block this entry refers to.")
+    state: str = Field(description="Indian state inferred from block_name using geographical knowledge of Indian mineral blocks.")
+    district: str = Field(description="Indian district inferred from block_name using geographical knowledge of Indian mineral blocks.")
+    changeSummary: str = Field(description="The change(s) applicable to this block as crisp bullet points.")
+
 class CorrigendumAddendum(BaseModel):
-    blockName: str = Field(description="Name of the mineral block(s) this document refers to. If multiple blocks are mentioned, join them with commas.")
     documentDate: str = Field(description="The date of the document as mentioned inside the document. e.g., '23rd January 2025', '15-02-2025'")
-    state: str = Field(description="Indian state inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
-    district: str = Field(description="Indian district inferred from block_name using geographical knowledge of Indian mineral blocks. Use 'Not specified' if genuinely unsure.")
-    summary: str = Field(description="Crisp bullet-point summary of every change proposed in the document, covering all of them without leaving any out.")
+    blocks: List[CorrigendumBlock] = Field(description="Every mineral block mentioned in the document. List each block separately — do NOT merge or join.")
+    summary: str = Field(description="Any document-level notes not specific to a single block. Empty string if nothing.")
 
 # Mapping object for the extractor
 PAGE_SCHEMA_MAP = {
@@ -68,22 +72,24 @@ PAGE_SCHEMA_MAP = {
         'model': CorrigendumAddendum,
         'prompt': """Extract the corrigendum/addendum details from this document.
 
-For block_name:
-- Find the name of the mineral block(s) this document refers to.
-- If multiple blocks are mentioned, join them with commas.
-- This is the most important field — extract it as precisely as possible.
+CRITICAL: A single document may reference multiple mineral blocks
+in different states. You MUST list EVERY block separately — do NOT
+merge or join them under one entry.
 
-For state and district:
-- Do NOT look for these in the document text — they will almost never be there.
-- Instead, use your geographical knowledge of Indian mineral blocks to
-  determine the state and district purely from the block_name you extracted.
-- For example:
-    - "Nawara-Nawadih Glauconite Block" → Bihar, Rohtas
-    - "Kalapathar-Raghudih REE and RM Block" → West Bengal, Purulia
-- If you are genuinely unsure about a block you cannot place, use "Not specified".
+For each block:
+- blockName: The name of the mineral block. Extract it as precisely as possible.
+- state: Infer from the blockName using your geographical knowledge of Indian mineral blocks. Do NOT look for state in the document text.
+- district: Infer from the blockName the same way.
+- changeSummary: The specific change(s) applicable to this block as crisp bullet points.
 
-For summary:
-- Summarize every change proposed in the document as crisp bullet points.
-- Do not leave out any change, no matter how minor."""
+Examples:
+  "Nawara-Nawadih Glauconite Block" → Bihar, Rohtas
+  "Kalapathar-Raghudih REE and RM Block" → West Bengal, Purulia
+
+If a change applies to all blocks (e.g. deadline extension), include it
+under each affected block's changeSummary.
+
+For the document-level summary field, put any overarching notes that
+do not belong to a single block. Empty string if nothing."""
     }
 }

@@ -374,12 +374,23 @@ def run_mstc():
 
     with tab4:
         st.subheader("Corrigendum & Addendum")
-        corr_resp = supabase.schema("mstc").table("corrigendum_addendum").select("*, processed_pdfs(discovered_at, file_id, pdf_url)").order("pdf_id", desc=True).execute()
+        corr_resp = supabase.schema("mstc").table("corrigendum_blocks") \
+            .select("*, corrigendum_addendum!inner(document_date, summary, pdf_id, processed_pdfs(discovered_at, file_id, pdf_url))") \
+            .order("corrigendum_id", desc=True) \
+            .execute()
         if corr_resp.data:
             df_corr = pd.DataFrame(corr_resp.data)
+
+            # Flatten nested joins
+            if 'corrigendum_addendum' in df_corr.columns:
+                parent_df = pd.json_normalize(df_corr['corrigendum_addendum'])
+                df_corr = pd.concat([df_corr.drop(columns=['corrigendum_addendum']), parent_df], axis=1)
             if 'processed_pdfs' in df_corr.columns:
-                nested_df = pd.json_normalize(df_corr['processed_pdfs'])
-                df_corr = pd.concat([df_corr.drop(columns=['processed_pdfs']), nested_df], axis=1)
+                pdf_meta = pd.json_normalize(df_corr['processed_pdfs'])
+                df_corr = pd.concat([df_corr.drop(columns=['processed_pdfs']), pdf_meta], axis=1)
+
+            # Clean column names
+            df_corr.columns = [c.split('.')[-1] for c in df_corr.columns]
 
             f1, f2 = st.columns(2)
             with f1:
@@ -396,8 +407,8 @@ def run_mstc():
                 mask &= df_corr['district'].isin(sel_districts)
 
             df_filtered = df_corr[mask].copy()
-            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'summary']
-            drop_cols = ['id', 'pdf_id']
+            req_cols = ['discovered_at', 'file_id', 'pdf_url', 'block_name', 'document_date', 'state', 'district', 'change_summary']
+            drop_cols = ['id', 'corrigendum_id', 'pdf_id']
             other_cols = [c for c in df_filtered.columns if c not in req_cols and c not in drop_cols]
             df_filtered = df_filtered[req_cols + other_cols]
 
@@ -406,7 +417,8 @@ def run_mstc():
                 use_container_width=True,
                 column_config={
                     "pdf_url": st.column_config.LinkColumn("PDF Link"),
-                    "summary": st.column_config.TextColumn("Summary", help="Bullet-point summary of changes")
+                    "change_summary": st.column_config.TextColumn("Change Summary", help="Per-block change details"),
+                    "block_name": st.column_config.TextColumn("Block Name"),
                 }
             )
         else:
