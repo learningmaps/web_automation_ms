@@ -225,7 +225,8 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
             if table.col_count != 5:
                 continue
             cells = table.extract()
-            if not any("Proposal No" in str(c) for row in cells for c in row if c):
+            FIELD_LABELS = ['Sector:', 'Activity:', 'Proposal For:', 'District:', 'Proposal No']
+            if not any(any(fl in str(c) for fl in FIELD_LABELS) for row in cells for c in row if c):
                 continue
             for row in cells:
                 sr = str(row[0]).strip() if row[0] else ''
