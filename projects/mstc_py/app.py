@@ -410,8 +410,12 @@ def run_mstc():
                 with f1:
                     states = sorted(s for s in df_blocks_all['state'].dropna().unique() if s)
                     sel_states = st.multiselect("State", states, placeholder="All", key="corr_state")
+                # District options cascade from selected states
                 with f2:
-                    districts = sorted(s for s in df_blocks_all['district'].dropna().unique() if s)
+                    df_for_districts = df_blocks_all
+                    if sel_states:
+                        df_for_districts = df_blocks_all[df_blocks_all['state'].isin(sel_states)]
+                    districts = sorted(s for s in df_for_districts['district'].dropna().unique() if s)
                     sel_districts = st.multiselect("District", districts, placeholder="All", key="corr_district")
                 with f3:
                     sel_search = st.text_input("Search Block", placeholder="Type block name...", key="corr_search")
