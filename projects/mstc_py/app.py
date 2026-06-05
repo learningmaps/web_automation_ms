@@ -381,16 +381,10 @@ def run_mstc():
         if corr_resp.data:
             df_corr = pd.DataFrame(corr_resp.data)
 
-            # Flatten nested joins
-            if 'corrigendum_addendum' in df_corr.columns:
-                parent_df = pd.json_normalize(df_corr['corrigendum_addendum'])
-                df_corr = pd.concat([df_corr.drop(columns=['corrigendum_addendum']), parent_df], axis=1)
-            if 'processed_pdfs' in df_corr.columns:
-                pdf_meta = pd.json_normalize(df_corr['processed_pdfs'])
-                df_corr = pd.concat([df_corr.drop(columns=['processed_pdfs']), pdf_meta], axis=1)
-
-            # Clean column names
+            # Clean column names (joins may be flat dot-notation or nested depending on client version)
             df_corr.columns = [c.split('.')[-1] for c in df_corr.columns]
+            # Deduplicate identical column names
+            df_corr = df_corr.loc[:, ~df_corr.columns.duplicated()]
 
             f1, f2 = st.columns(2)
             with f1:
