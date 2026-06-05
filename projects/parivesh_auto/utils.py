@@ -9,7 +9,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
 import os
+import threading
 import fitz
+
+# PyMuPDF (fitz) has known thread-safety issues with global state (font cache, etc.).
+# Serialise all fitz calls through this lock.
+_fitz_lock = threading.Lock()
 
 # Ensure parent 'projects' directory is in sys.path to allow absolute sub-project imports
 import sys
@@ -217,25 +222,26 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
     merges continuation rows, and parses field values from each cell.
     Falls back to extract_proposals_from_text if no tables found.
     '''
-    doc = fitz.open(stream=pdf_content, filetype="pdf")
+    with _fitz_lock:
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
 
-    all_rows = []
-    for page in doc:
-        for table in page.find_tables():
-            if table.col_count != 5:
-                continue
-            cells = table.extract()
-            # Normalize whitespace before colons (Sector : → Sector:) to handle PDF spacing variations
-            FIELD_LABELS = ['Sector:', 'Activity:', 'Proposal For:', 'District:', 'Proposal No:']
-            if not any(any(fl in re.sub(r'\s*:', ':', str(c)) for fl in FIELD_LABELS) for row in cells for c in row if c):
-                continue
-            for row in cells:
-                sr = str(row[0]).strip() if row[0] else ''
-                det = str(row[1]) if row[1] else ''
-                if sr and 'Sr.' in sr and 'Proposal' in det[:30]:
+        all_rows = []
+        for page in doc:
+            for table in page.find_tables():
+                if table.col_count != 5:
                     continue
-                all_rows.append(row)
-    doc.close()
+                cells = table.extract()
+                # Normalize whitespace before colons (Sector : → Sector:) to handle PDF spacing variations
+                FIELD_LABELS = ['Sector:', 'Activity:', 'Proposal For:', 'District:', 'Proposal No:']
+                if not any(any(fl in re.sub(r'\s*:', ':', str(c)) for fl in FIELD_LABELS) for row in cells for c in row if c):
+                    continue
+                for row in cells:
+                    sr = str(row[0]).strip() if row[0] else ''
+                    det = str(row[1]) if row[1] else ''
+                    if sr and 'Sr.' in sr and 'Proposal' in det[:30]:
+                        continue
+                    all_rows.append(row)
+        doc.close()
 
     if not all_rows:
         return []
@@ -388,35 +394,36 @@ def merge_page_boundaries(pdf_content: bytes) -> str:
     corresponding lines in the page's get_text() are moved to the end of
     the previous page's text so that split rows remain contiguous.
     """
-    doc = fitz.open(stream=pdf_content, filetype="pdf")
+    with _fitz_lock:
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
 
-    page_texts: list[str] = []
+        page_texts: list[str] = []
 
-    for page_idx in range(len(doc)):
-        page = doc[page_idx]
-        text = page.get_text()
-        blocks = page.get_text("blocks")
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            text = page.get_text()
+            blocks = page.get_text("blocks")
 
-        content = [
-            b for b in blocks
-            if b[4].strip() and not re.match(r'^Page \d+ of \d+', b[4].strip())
-        ]
+            content = [
+                b for b in blocks
+                if b[4].strip() and not re.match(r'^Page \d+ of \d+', b[4].strip())
+            ]
 
-        if page_idx == 0 or not content:
-            page_texts.append(text)
-            continue
+            if page_idx == 0 or not content:
+                page_texts.append(text)
+                continue
 
-        groups = _group_blocks_by_row(content)
+            groups = _group_blocks_by_row(content)
 
-        if _has_sr_no(groups[0]):
-            page_texts.append(text)
-        else:
-            cont_lines, main_lines = _cut_page_at_new_row(text)
-            if cont_lines:
-                page_texts[-1] += '\n' + cont_lines
-            page_texts.append(main_lines)
+            if _has_sr_no(groups[0]):
+                page_texts.append(text)
+            else:
+                cont_lines, main_lines = _cut_page_at_new_row(text)
+                if cont_lines:
+                    page_texts[-1] += '\n' + cont_lines
+                page_texts.append(main_lines)
 
-    doc.close()
+        doc.close()
     return '\n'.join(page_texts)
 
 
@@ -426,48 +433,50 @@ def truncate_pdf(pdf_content: bytes) -> bytes:
     Uses coordinate-based block detection for all stop patterns in priority order.
     If no pattern is found via coordinates, returns the original content unchanged.
     """
-    doc = fitz.open(stream=pdf_content, filetype="pdf")
+    with _fitz_lock:
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
 
-    stop_patterns = [
-        "Any Other Item(s)",
-        "Remarks",
-        "List & Correspondence addresses",
-        "Composition of Expert Appraisal Committee",
-    ]
+        stop_patterns = [
+            "Any Other Item(s)",
+            "Remarks",
+            "List & Correspondence addresses",
+            "Composition of Expert Appraisal Committee",
+        ]
 
-    best_page = None
-    best_y = None
-    for i, page in enumerate(doc):
-        for b in page.get_text("blocks"):
-            for pat in stop_patterns:
-                if pat.lower() in b[4].lower():
-                    if best_page is None or i < best_page or (i == best_page and b[1] < best_y):
-                        best_page, best_y = i, b[1]
-                    break
+        best_page = None
+        best_y = None
+        for i, page in enumerate(doc):
+            for b in page.get_text("blocks"):
+                for pat in stop_patterns:
+                    if pat.lower() in b[4].lower():
+                        if best_page is None or i < best_page or (i == best_page and b[1] < best_y):
+                            best_page, best_y = i, b[1]
+                        break
 
-    if best_page is None:
+        if best_page is None:
+            doc.close()
+            return pdf_content
+
+        # Keep pages up to and including the cutoff page
+        doc.select(list(range(best_page + 1)))
+
+        # Redact content below cutoff on the last page
+        page = doc[-1]
+        rect = fitz.Rect(0, best_y, page.rect.x1, page.rect.y1)
+        page.add_redact_annot(rect)
+        page.apply_redactions()
+
+        result = doc.tobytes()
         doc.close()
-        return pdf_content
-
-    # Keep pages up to and including the cutoff page
-    doc.select(list(range(best_page + 1)))
-
-    # Redact content below cutoff on the last page
-    page = doc[-1]
-    rect = fitz.Rect(0, best_y, page.rect.x1, page.rect.y1)
-    page.add_redact_annot(rect)
-    page.apply_redactions()
-
-    result = doc.tobytes()
-    doc.close()
     return result
 
 
 def extract_agenda_text(pdf_content: bytes) -> str:
     """Extract text from a (pre-truncated) PDF. No cut-off logic — already handled by truncate_pdf."""
-    doc = fitz.open(stream=pdf_content, filetype="pdf")
-    text = "\n".join(page.get_text() for page in doc)
-    doc.close()
+    with _fitz_lock:
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
+        text = "\n".join(page.get_text() for page in doc)
+        doc.close()
     return text.strip()
 
 
