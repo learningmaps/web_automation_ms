@@ -94,7 +94,7 @@ def load_base_metrics():
     return {"unprocessed": unprocessed, "keyword_matches": keyword_matches}
 
 
-def load_proposals_data(limit=200):
+def load_proposals_data(limit=5000):
     conn_string = get_secret("DATABASE_URL")
     if not conn_string:
         return pd.DataFrame()
