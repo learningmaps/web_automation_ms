@@ -355,8 +355,7 @@ def run_parivesh():
         st.markdown("### Proposal Filters")
         pf1, pf2, pf3, pf4 = st.columns(4)
         with pf1:
-            cg = next((s for s in all_states if s.upper() == 'CHHATTISGARH'), None)
-            default_state = [cg] if cg else []
+            default_state = ['CHHATTISGARH'] if 'CHHATTISGARH' in all_states else []
             sel_state = st.multiselect("State", options=all_states, default=default_state, key="pr_state")
         with pf2:
             sel_sector = st.multiselect("Sector", options=all_sectors, key="pr_sector")
