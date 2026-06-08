@@ -40,7 +40,8 @@ def load_agendas():
         SELECT id, norm_subject, meeting_id, date, committee_type,
                meeting_start_date, meeting_end_date, sector_name,
                statename_derived, matched_keywords, pdffilepath,
-               is_processed, processed_on, subject AS raw_subject
+               is_processed, processed_on, subject AS raw_subject,
+               pdf_storage_url, mom_pdf_storage_url
         FROM parivesh.agenda_v3
         WHERE ref_type = 'AGENDA' AND matched_keywords IS NOT NULL
         ORDER BY date DESC NULLS LAST
@@ -80,7 +81,8 @@ def load_moms(norm_subjects):
     query = """
         SELECT id, norm_subject, meeting_id, date, committee_type,
                pdffilepath, subject AS raw_subject,
-               meeting_start_date, meeting_end_date
+               meeting_start_date, meeting_end_date,
+               pdf_storage_url
         FROM parivesh.agenda_v3
         WHERE ref_type = 'MOM'
         AND norm_subject = ANY(%s)
@@ -426,10 +428,10 @@ def run_parivesh():
         if subject_search:
             filtered_agendas = filtered_agendas[filtered_agendas['raw_subject'].str.contains(subject_search, case=False, na=False)]
 
-        # Proposal filter flags (for resetting page and checking if active)
+        # Proposal filter flags
         prop_filters_active = bool(sel_state) or bool(sel_sector) or bool(sel_prop_for) or bool(sel_district) or bool(proponent_search) or bool(proposal_search)
 
-        # When proposal filters are active, query across ALL keyword-matched agendas (not just current page)
+        # When proposal filters are active, narrow agendas to those with matching proposals
         if prop_filters_active:
             matching_ids = load_proposal_matching_agenda_ids(
                 state=sel_state if sel_state else None,
@@ -442,7 +444,6 @@ def run_parivesh():
             filtered_agendas = filtered_agendas[filtered_agendas['id'].isin(matching_ids)]
 
         total_filtered = len(filtered_agendas)
-        page_agendas = filtered_agendas
 
         # ─── METRICS ───
         base_metrics = load_base_metrics()
@@ -452,131 +453,136 @@ def run_parivesh():
         m3.metric("Unprocessed", base_metrics["unprocessed"])
         m4.metric("Keyword Matches", base_metrics["keyword_matches"])
 
-        # ─── LOAD CURRENT PAGE DATA (proposals + MOMs only for this page) ───
-        page_ids = page_agendas['id'].tolist()
-        page_norm_subjects = page_agendas['norm_subject'].dropna().tolist()
+        # ─── AGENDA TABLE ───
+        display_df = filtered_agendas.copy()
+        display_df['_mom_status'] = display_df['norm_subject'].apply(
+            lambda x: '✓' if pd.notna(x) and str(x) in mom_subjects else '✗'
+        )
+        display_df['_subject_short'] = display_df['raw_subject'].apply(
+            lambda x: (str(x)[:80] + '...') if x and len(str(x)) > 80 else (str(x) if x else '')
+        )
 
-        with st.spinner("Loading proposals for this page..."):
-            proposals_df = load_proposals(page_ids)
-        with st.spinner("Loading MOM documents for this page..."):
-            moms_df = load_moms(page_norm_subjects)
+        table_cols = ['date', 'committee_type', '_subject_short', '_mom_status', 'statename_derived']
+        table_df = display_df[table_cols].copy()
+        table_df.columns = ['Date', 'Committee', 'Subject', 'MOM', 'State']
 
-        proposals_by_agenda = {}
-        if not proposals_df.empty:
-            for _, row in proposals_df.iterrows():
-                proposals_by_agenda.setdefault(row['agenda_id'], []).append(row.to_dict())
+        st.markdown("### Agendas")
+        event = st.dataframe(
+            table_df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+        )
 
-        moms_by_subject = {}
-        if not moms_df.empty:
-            for _, row in moms_df.iterrows():
-                moms_by_subject[row['norm_subject']] = row.to_dict()
+        # ─── SELECTION ───
+        selected_id = None
+        if event and hasattr(event, "selection") and event.selection:
+            rows = getattr(event.selection, "rows", [])
+            if not rows and isinstance(event.selection, dict):
+                rows = event.selection.get("rows", [])
+            if rows:
+                selected_id = filtered_agendas.iloc[rows[0]]['id']
 
-        # ─── AGENDA CARDS ───
-        st.markdown("### Agendas & Proposals")
+        if not selected_id and not filtered_agendas.empty:
+            selected_id = filtered_agendas.iloc[0]['id']
 
-        # ─── RENDER AGENDA CARDS ───
-        cards_shown = 0
-        for _, agenda in page_agendas.iterrows():
-            aid = agenda['id']
-            agenda_proposals = proposals_by_agenda.get(aid, [])
+        if selected_id is None:
+            st.info("No agendas match the current filters.")
+            st.markdown("---")
+        else:
+            selected_row = filtered_agendas[filtered_agendas['id'] == selected_id].iloc[0]
 
-            filtered_props = agenda_proposals
-            if sel_state:
-                filtered_props = [p for p in filtered_props if p.get('state') in sel_state]
-            if sel_sector:
-                filtered_props = [p for p in filtered_props if p.get('sector') in sel_sector]
-            if sel_prop_for:
-                filtered_props = [p for p in filtered_props if p.get('proposal_for') in sel_prop_for]
-            if sel_district:
-                filtered_props = [p for p in filtered_props if p.get('district') in sel_district]
-            if proponent_search:
-                q = proponent_search.lower()
-                filtered_props = [p for p in filtered_props if q in (p.get('proponent', '') or '').lower()]
-            if proposal_search:
-                q = proposal_search.lower()
-                filtered_props = [p for p in filtered_props if q in (p.get('proposal_no', '') or '').lower()]
+            with st.spinner("Loading proposals and MOM..."):
+                mom = None
+                ns = selected_row['norm_subject']
+                if ns and pd.notna(ns):
+                    mom_df = load_moms([ns])
+                    if not mom_df.empty:
+                        mom = mom_df.iloc[0].to_dict()
 
-            if prop_filters_active and not filtered_props:
-                continue
+                proposals_list = []
+                proposals_df = load_proposals([selected_id])
+                if not proposals_df.empty:
+                    proposals_list = proposals_df.to_dict('records')
 
-            cards_shown += 1
+            # ─── DETAIL: Agenda Metadata ───
+            st.markdown("---")
+            with st.container(border=True):
+                st.markdown("#### Agenda Details")
+                a1, a2 = st.columns(2)
+                with a1:
+                    st.markdown(f"**Meeting ID:** {selected_row.get('meeting_id', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Date:** {selected_row.get('date', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Meeting Start:** {selected_row.get('meeting_start_date', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Sector:** {selected_row.get('sector_name', 'N/A') or 'N/A'}")
+                with a2:
+                    st.markdown(f"**Committee:** {selected_row.get('committee_type', 'N/A') or 'N/A'}")
+                    st.markdown(f"**State:** {selected_row.get('statename_derived', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Meeting End:** {selected_row.get('meeting_end_date', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Keywords:** {selected_row.get('matched_keywords', 'N/A') or 'N/A'}")
+                st.markdown(f"**Subject:** {selected_row.get('raw_subject', 'N/A') or 'N/A'}")
 
-            mom = moms_by_subject.get(agenda['norm_subject'])
-            mom_badge = ""
-            if mom:
-                mom_badge = '<span class="mom-badge">✓ MOM</span>'
-            else:
-                mom_badge = '<span class="no-mom-badge">No MOM</span>'
+                link_cols = st.columns(2)
+                with link_cols[0]:
+                    parivesh_url = selected_row.get('pdffilepath', '')
+                    if parivesh_url and pd.notna(parivesh_url):
+                        st.link_button("📄 View Agenda PDF (Parivesh)", parivesh_url, use_container_width=True)
+                with link_cols[1]:
+                    storage_url = selected_row.get('pdf_storage_url', '')
+                    if storage_url and pd.notna(storage_url):
+                        st.link_button("📄 View Agenda PDF (Supabase)", storage_url, use_container_width=True)
 
-            meeting_date = agenda.get('date', '?') or '?'
-            committee = agenda.get('committee_type', '?') or '?'
-            subject_display = agenda.get('raw_subject', '') or '(no subject)'
-            if len(subject_display) > 100:
-                subject_display = subject_display[:100] + "..."
-
-            n_props = len(filtered_props)
-            expanded = n_props <= 3
-            label = f"{meeting_date} · {committee} · {n_props} proposal(s) · {agenda.get('statename_derived', '') or ''}"
-
-            with st.expander(label, expanded=expanded):
-                meta_cols = st.columns([2, 1, 1])
-                with meta_cols[0]:
-                    st.markdown(f"**Meeting ID:** {agenda.get('meeting_id', 'N/A') or 'N/A'}")
-                    st.markdown(f"**Subject:** {subject_display}")
-                    if agenda.get('sector_name'):
-                        st.markdown(f"**Sector:** {agenda['sector_name']}")
-                with meta_cols[1]:
-                    pdf_url = agenda.get('pdffilepath', '')
-                    if pdf_url and pd.notna(pdf_url):
-                        st.link_button("📄 View Agenda PDF", pdf_url, use_container_width=True)
-                with meta_cols[2]:
-                    st.markdown(mom_badge, unsafe_allow_html=True)
-                    if mom:
-                        mom_pdf = mom.get('pdffilepath', '')
-                        if mom_pdf and pd.notna(mom_pdf):
-                            st.link_button("📄 View MOM PDF", mom_pdf, use_container_width=True)
-
-                st.markdown("---")
+            # ─── DETAIL: Minutes of Meeting ───
+            with st.container(border=True):
                 if mom:
-                    st.markdown("##### Minutes of Meeting")
-                    mom_cols = st.columns(3)
-                    with mom_cols[0]:
-                        st.markdown(f"**Date:** {mom.get('date', 'N/A') or 'N/A'}")
-                    with mom_cols[1]:
+                    st.markdown("#### Minutes of Meeting")
+                    m1, m2 = st.columns(2)
+                    with m1:
                         st.markdown(f"**Meeting ID:** {mom.get('meeting_id', 'N/A') or 'N/A'}")
-                    with mom_cols[2]:
-                        mom_subj = mom.get('raw_subject', '') or '(no subject)'
-                        st.markdown(f"**Subject:** {mom_subj[:80]}{'...' if len(mom_subj) > 80 else ''}")
+                        st.markdown(f"**Date:** {mom.get('date', 'N/A') or 'N/A'}")
+                        st.markdown(f"**Meeting Start:** {mom.get('meeting_start_date', 'N/A') or 'N/A'}")
+                    with m2:
+                        st.markdown(f"**Committee:** {mom.get('committee_type', 'N/A') or 'N/A'}")
+                        st.markdown(f"**Meeting End:** {mom.get('meeting_end_date', 'N/A') or 'N/A'}")
+                    st.markdown(f"**Subject:** {mom.get('raw_subject', 'N/A') or 'N/A'}")
+
+                    link_cols = st.columns(2)
+                    with link_cols[0]:
+                        mom_parivesh = mom.get('pdffilepath', '')
+                        if mom_parivesh and pd.notna(mom_parivesh):
+                            st.link_button("📄 View MOM PDF (Parivesh)", mom_parivesh, use_container_width=True)
+                    with link_cols[1]:
+                        mom_storage = mom.get('pdf_storage_url', '') or selected_row.get('mom_pdf_storage_url', '')
+                        if mom_storage and pd.notna(mom_storage):
+                            st.link_button("📄 View MOM PDF (Supabase)", mom_storage, use_container_width=True)
                 else:
+                    st.markdown("#### Minutes of Meeting")
                     st.markdown("*No MOM document linked to this agenda.*")
 
-                st.markdown("---")
-                st.markdown(f"##### Proposals ({n_props})")
-                if filtered_props:
-                    props_df = pd.DataFrame(filtered_props)
-                    display_cols = ['sr_no', 'proposal_no', 'project_name', 'proposal_for',
-                                    'sector', 'state', 'district', 'proponent']
-                    existing_cols = [c for c in display_cols if c in props_df.columns]
-                    st.dataframe(
-                        props_df[existing_cols],
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "sr_no": st.column_config.NumberColumn("S.No", width="small"),
-                            "proposal_no": st.column_config.TextColumn("Proposal No", width="medium"),
-                            "project_name": st.column_config.TextColumn("Project Name", width="large"),
-                            "proposal_for": st.column_config.TextColumn("Proposal For", width="medium"),
-                            "sector": st.column_config.TextColumn("Sector", width="small"),
-                            "state": st.column_config.TextColumn("State", width="small"),
-                            "district": st.column_config.TextColumn("District", width="small"),
-                            "proponent": st.column_config.TextColumn("Proponent", width="medium"),
-                        }
-                    )
+            # ─── DETAIL: Proposals ───
+            with st.container(border=True):
+                st.markdown(f"#### Proposals ({len(proposals_list)})")
+                if proposals_list:
+                    for prop in proposals_list:
+                        with st.container(border=True):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.markdown(f"**Sr No:** {prop.get('sr_no', 'N/A')}")
+                                st.markdown(f"**Proposal No:** {prop.get('proposal_no', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Project Name:** {prop.get('project_name', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Proposal For:** {prop.get('proposal_for', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Sector:** {prop.get('sector', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Activity:** {prop.get('activity', 'N/A') or 'N/A'}")
+                            with c2:
+                                st.markdown(f"**File No:** {prop.get('file_no', 'N/A') or 'N/A'}")
+                                st.markdown(f"**State:** {prop.get('state', 'N/A') or 'N/A'}")
+                                st.markdown(f"**District:** {prop.get('district', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Proponent:** {prop.get('proponent', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Meeting Date:** {prop.get('meeting_date', 'N/A') or 'N/A'}")
+                                st.markdown(f"**Meeting ID:** {prop.get('meeting_id', 'N/A') or 'N/A'}")
                 else:
                     st.info("No proposals extracted for this agenda yet.")
-
-        if cards_shown == 0:
-            st.info("No agendas match the current filters.")
 
         # ─── EXPORT ───
         st.markdown("---")
