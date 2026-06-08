@@ -256,6 +256,36 @@ def run_parivesh():
         div[data-testid="stCheckbox"] label p { font-weight: 500; }
         .mom-badge { color: #166534; font-weight: 600; }
         .no-mom-badge { color: #991b1b; font-weight: 500; }
+        .section-header-agenda {
+            background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+            border-left: 4px solid #2563EB;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            font-size: 17px;
+            color: #1E40AF;
+        }
+        .section-header-mom {
+            background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+            border-left: 4px solid #059669;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            font-size: 17px;
+            color: #065F46;
+        }
+        .section-header-proposals {
+            background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+            border-left: 4px solid #D97706;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            font-size: 17px;
+            color: #92400E;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -521,7 +551,7 @@ def run_parivesh():
             # ─── DETAIL: Agenda Metadata ───
             st.markdown("---")
             with st.container(border=True):
-                st.markdown("#### Agenda Details")
+                st.markdown('<div class="section-header-agenda">📋 Agenda Details</div>', unsafe_allow_html=True)
                 a1, a2 = st.columns(2)
                 with a1:
                     st.markdown(f"**Meeting ID:** {selected_row.get('meeting_id', 'N/A') or 'N/A'}")
@@ -548,7 +578,7 @@ def run_parivesh():
             # ─── DETAIL: Minutes of Meeting ───
             with st.container(border=True):
                 if mom:
-                    st.markdown("#### Minutes of Meeting")
+                    st.markdown('<div class="section-header-mom">📄 Minutes of Meeting</div>', unsafe_allow_html=True)
                     m1, m2 = st.columns(2)
                     with m1:
                         st.markdown(f"**Meeting ID:** {mom.get('meeting_id', 'N/A') or 'N/A'}")
@@ -569,12 +599,12 @@ def run_parivesh():
                         if mom_storage and pd.notna(mom_storage):
                             st.link_button("📄 View MOM PDF (Supabase)", mom_storage, use_container_width=True)
                 else:
-                    st.markdown("#### Minutes of Meeting")
+                    st.markdown('<div class="section-header-mom">📄 Minutes of Meeting</div>', unsafe_allow_html=True)
                     st.markdown("*No MOM document linked to this agenda.*")
 
             # ─── DETAIL: Proposals ───
             with st.container(border=True):
-                st.markdown(f"#### Proposals ({len(proposals_list)})")
+                st.markdown(f'<div class="section-header-proposals">📑 Proposals ({len(proposals_list)})</div>', unsafe_allow_html=True)
                 if proposals_list:
                     for prop in proposals_list:
                         with st.container(border=True):
