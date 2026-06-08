@@ -24,6 +24,7 @@ if parent_dir not in sys.path:
 
 from parivesh_auto.constants import KEYWORDS, TABLE_NAME, PROPOSALS_TABLE_NAME
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from common.storage_utils import upload_pdf_to_storage
 import logging
 
 # Setup Logging
@@ -441,7 +442,7 @@ class PariveshScraper:
     def _download_and_extract_text(
         self, rec_id: int, pdfpath: str, meeting_id: str,
         committee_type: str | None = None, statename_derived: str | None = None
-    ) -> Tuple[int, str, List[str], List[dict], str]:
+    ) -> Tuple[int, str, List[str], List[dict], str, str | None]:
         """Worker function for threads: Downloads, extracts text, matches keywords, and parses proposals."""
         try:
             time.sleep(0.1 * (rec_id % 10))
@@ -449,7 +450,7 @@ class PariveshScraper:
             # SEIAA/SEAC non-CG: skip entirely
             if committee_type in ('SEIAA', 'SEAC') and statename_derived != 'Chhattisgarh':
                 logger.debug(f"Skipping non-CG {committee_type} doc ID {rec_id}")
-                return rec_id, "", [], [], "Success"
+                return rec_id, "", [], [], "Success", None
 
             logger.debug(f"Downloading PDF for ID {rec_id}")
             resp = self.session.get(pdfpath, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
@@ -468,6 +469,18 @@ class PariveshScraper:
                 # EAC: keyword matching on the cleaned text
                 matched = [kw for kw, pat in self.keyword_patterns.items() if pat.search(cleaned_text.lower())]
 
+            # Upload raw PDF to storage if keyword-matched
+            pdf_storage_url = None
+            if matched:
+                try:
+                    pdf_storage_url = upload_pdf_to_storage(
+                        resp.content,
+                        "parivesh-pdfs",
+                        f"parivesh/{committee_type}/agendas/{rec_id}.pdf"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to upload PDF for ID {rec_id}: {e}")
+
             # Parse proposals — try table-based extraction first, validate, then Gemini fallback
             proposals = extract_proposals_via_tables(truncated_pdf) if matched else []
             if matched and (not proposals or not _proposals_valid(proposals)):
@@ -476,10 +489,10 @@ class PariveshScraper:
             for prop in proposals:
                 prop['meeting_id'] = meeting_id
 
-            return rec_id, cleaned_text, matched, proposals, "Success"
+            return rec_id, cleaned_text, matched, proposals, "Success", pdf_storage_url
         except Exception as e:
             logger.warning(f"Failed to process PDF for ID {rec_id}: {e}")
-            return rec_id, "", [], [], f"Error: {str(e)}"
+            return rec_id, "", [], [], f"Error: {str(e)}", None
 
     def process_pdfs_and_update(
         self, limit: int | None = None, max_workers: int | None = None
@@ -512,8 +525,9 @@ class PariveshScraper:
                 is_processed = 1,
                 matched_keywords = v.matched,
                 processed_on = v.proc_on,
-                pdf_text = v.txt
-            FROM (VALUES %s) AS v(id, matched, proc_on, txt)
+                pdf_text = v.txt,
+                pdf_storage_url = v.storage_url
+            FROM (VALUES %s) AS v(id, matched, proc_on, txt, storage_url)
             WHERE v.id = t.id
         """
 
@@ -538,12 +552,12 @@ class PariveshScraper:
             }
 
             for i, future in enumerate(as_completed(future_map), 1):
-                rec_id, text, keywords, proposals, status = future.result()
+                rec_id, text, keywords, proposals, status, storage_url = future.result()
                 now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
                 if status == "Success":
                     kw_str = ",".join(keywords) if keywords else None
-                    agenda_batch.append((rec_id, kw_str, now, text))
+                    agenda_batch.append((rec_id, kw_str, now, text, storage_url))
                     for prop in proposals:
                         proposals_batch.append((
                             rec_id, prop.get("sr_no"), prop.get("proposal_no"),
