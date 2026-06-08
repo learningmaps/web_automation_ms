@@ -159,7 +159,7 @@ excel_files/
 migrate_to_supabase.py
 testing.ipynb
 test_refresh.ipynb
-setup_mat_view.py
+# setup_mat_view.py removed — MV no longer used
 reprocess_database.py
 migrate_dates.py
 migrate_states.py

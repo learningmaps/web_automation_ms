@@ -9,7 +9,7 @@ An automated monitoring and data management system designed to track, process, a
 - **Consolidated Dashboard:** A Streamlit-based UI to filter, search, and analyze project data.
 - **Smart Data Linking:** Automatically links meeting agendas with their corresponding Minutes of Meetings (MOM).
 - **Export Capabilities:** Export filtered data views directly to Excel for offline analysis.
-- **Database Integration:** Built for Supabase (PostgreSQL) with materialized views for high-performance data retrieval.
+- **Database Integration:** Built for Supabase (PostgreSQL) with direct queries for real-time data retrieval.
 
 ## 🛠️ Tech Stack
 
@@ -62,15 +62,11 @@ An automated monitoring and data management system designed to track, process, a
 2. **Sync Data:**
    Use the "Fetch New Documents" button in the dashboard to trigger the automated scraper and PDF processor.
 
-3. **Refresh View:**
-   After syncing, use "Refresh View" to update the consolidated project list in the UI.
-
 ## 📁 Project Structure
 
 - `app.py`: Main Streamlit application and dashboard UI.
 - `utils.py`: Core scraper logic and PDF processing engine.
 - `constants.py`: Centralized keyword list and database configuration.
-- `setup_mat_view.py`: SQL script for creating the materialized view in PostgreSQL.
 - `requirements.txt`: List of Python dependencies.
 
 ## ⚠️ Security Note
