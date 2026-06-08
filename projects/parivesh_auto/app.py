@@ -138,11 +138,51 @@ def load_proposal_filter_options():
         conn.close()
     return options
 
+def load_proposal_matching_agenda_ids(state=None, sector=None, proposal_for=None,
+                                      district=None, proponent=None, proposal_no=None):
+    """Return agenda_ids (from keyword-matched AGENDA set) whose extracted proposals match given filters."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    conditions = []
+    params = []
+    if state:
+        conditions.append("ep.state = ANY(%s)")
+        params.append(state)
+    if sector:
+        conditions.append("ep.sector = ANY(%s)")
+        params.append(sector)
+    if proposal_for:
+        conditions.append("ep.proposal_for = ANY(%s)")
+        params.append(proposal_for)
+    if district:
+        conditions.append("ep.district = ANY(%s)")
+        params.append(district)
+    if proponent:
+        conditions.append("ep.proponent ILIKE %s")
+        params.append(f"%{proponent}%")
+    if proposal_no:
+        conditions.append("ep.proposal_no ILIKE %s")
+        params.append(f"%{proposal_no}%")
+    try:
+        where = " AND ".join(conditions) if conditions else "TRUE"
+        cur.execute(f"""
+            SELECT DISTINCT ep.agenda_id FROM parivesh.extracted_proposals ep
+            JOIN parivesh.agenda_v3 a ON ep.agenda_id = a.id
+            WHERE a.ref_type = 'AGENDA' AND a.matched_keywords IS NOT NULL
+            AND {where}
+        """, params)
+        return {row[0] for row in cur.fetchall()}
+    except Exception as e:
+        logger.error(f"Error loading matching agenda IDs: {e}")
+        return set()
+    finally:
+        conn.close()
+
 def load_base_metrics():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE is_processed = 0 AND ref_type = 'AGENDA' AND matched_keywords IS NOT NULL")
+        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE is_processed = 0 AND ref_type = 'AGENDA'")
         unprocessed = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE matched_keywords IS NOT NULL AND ref_type = 'AGENDA'")
         keyword_matches = cur.fetchone()[0]
@@ -355,8 +395,7 @@ def run_parivesh():
         st.markdown("### Proposal Filters")
         pf1, pf2, pf3, pf4 = st.columns(4)
         with pf1:
-            default_state = ['CHHATTISGARH'] if 'CHHATTISGARH' in all_states else []
-            sel_state = st.multiselect("State", options=all_states, default=default_state, key="pr_state")
+            sel_state = st.multiselect("State", options=all_states, default=[], key="pr_state")
         with pf2:
             sel_sector = st.multiselect("Sector", options=all_sectors, key="pr_sector")
         with pf3:
@@ -391,6 +430,18 @@ def run_parivesh():
 
         # Proposal filter flags (for resetting page and checking if active)
         prop_filters_active = bool(sel_state) or bool(sel_sector) or bool(sel_prop_for) or bool(sel_district) or bool(proponent_search) or bool(proposal_search)
+
+        # When proposal filters are active, query across ALL keyword-matched agendas (not just current page)
+        if prop_filters_active:
+            matching_ids = load_proposal_matching_agenda_ids(
+                state=sel_state if sel_state else None,
+                sector=sel_sector if sel_sector else None,
+                proposal_for=sel_prop_for if sel_prop_for else None,
+                district=sel_district if sel_district else None,
+                proponent=proponent_search if proponent_search else None,
+                proposal_no=proposal_search if proposal_search else None,
+            )
+            filtered_agendas = filtered_agendas[filtered_agendas['id'].isin(matching_ids)]
 
         # ─── PAGINATION ───
         total_filtered = len(filtered_agendas)
