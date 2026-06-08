@@ -14,10 +14,13 @@ load_dotenv()
 primary_key = os.getenv("GEMINI_API_KEY")
 secondary_key = os.getenv("GEMINI_API_KEY_D")
 
-if not primary_key:
-    raise ValueError("GEMINI_API_KEY not found in environment")
-
 T = TypeVar("T", bound=BaseModel)
+
+
+def _ensure_keys() -> None:
+    """Raise if primary key is missing (checked lazily, not at import time)."""
+    if not primary_key:
+        raise ValueError("GEMINI_API_KEY not found in environment")
 
 FALLBACK_MODELS = [
     "models/gemini-3.1-flash-lite",
@@ -49,6 +52,7 @@ def extract_structured_data(
     Returns:
         An instance of response_model parsed from the model output.
     """
+    _ensure_keys()
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_id)
     is_gemma = "gemma" in model_id.lower()

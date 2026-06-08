@@ -34,6 +34,11 @@ jobs:
       - name: Run Scraper
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_INDIA: ${{ secrets.DATABASE_URL_INDIA }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_D: ${{ secrets.GEMINI_API_KEY_D }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           PYTHONPATH: .
         run: |
           python projects/parivesh_auto/run_scraper.py --limit ${{ github.event.inputs.limit || '50' }}
