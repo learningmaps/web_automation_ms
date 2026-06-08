@@ -172,7 +172,18 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
         if any(v in full_text for v in CHHATTISGARH_VARIANTS):
             results.append(p)
 
-    return results
+    # Dedup: same content (excluding sr_no) → keep first occurrence
+    seen = set()
+    deduped = []
+    for p in results:
+        key = tuple(p.get(k, '') for k in (
+            'proposal_no', 'file_no', 'project_name', 'proposal_for',
+            'activity', 'sector', 'state', 'district', 'proponent', 'meeting_date'
+        ))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    return deduped
 
 
 
