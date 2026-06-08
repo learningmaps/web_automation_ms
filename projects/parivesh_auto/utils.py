@@ -147,23 +147,18 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
         match = re.search(r'Sector\s*:\s*([^\n]+)', details)
         p['sector'] = match.group(1).strip() if match else ''
 
-        # State from Location cell
+        # State from Location cell — no .title() fallback; blank stays blank so validation fails
         match = re.search(
             r'State\s*:\s*(.+?)(?=\n\s*District\s*:|\Z)', location, re.DOTALL
         )
         state_raw = match.group(1).strip() if match else ''
-        if not state_raw:
-            for v in CHHATTISGARH_VARIANTS:
-                m2 = re.search(rf'(?<!\w){re.escape(v)}(?!\w)', location, re.IGNORECASE)
-                if m2:
-                    state_raw = m2.group(0).title()
-                    break
-        p['state'] = state_raw
+        p['state'] = state_raw.upper()
 
         # District from Location cell
         match = re.search(r'District\s*:\s*(.*)', location, re.DOTALL)
         district_raw = ' '.join(match.group(1).split()) if match else ''
         district_raw = re.sub(r'\s+\d+\s*$', '', district_raw)
+        district_raw = re.sub(r'\s*-\s*', '-', district_raw.upper())
         p['district'] = district_raw
 
         # Meeting date
@@ -234,6 +229,24 @@ def extract_agenda_text(pdf_content: bytes) -> str:
         text = "\n".join(page.get_text() for page in doc)
         doc.close()
     return text.strip()
+
+
+def _proposals_valid(proposals: list[dict]) -> bool:
+    """Return True only if ALL proposals have valid state=CHHATTISGARH and clean district."""
+    DATE_PATTERN = re.compile(r'\d{2}/\d{2}/\d{4}')
+    BLEED_WORDS = re.compile(r'LIMITED|PVT|CORPORATION|INDUSTRIES|COMPANY|CONSTRUCTIO', re.IGNORECASE)
+    for p in proposals:
+        state = p.get('state', '').strip().upper()
+        district = p.get('district', '').strip()
+        if state != 'CHHATTISGARH':
+            return False
+        if not district:
+            return False
+        if DATE_PATTERN.search(district):
+            return False
+        if BLEED_WORDS.search(district):
+            return False
+    return True
 
 
 class PariveshScraper:
@@ -440,9 +453,9 @@ class PariveshScraper:
                 # EAC: keyword matching on the cleaned text
                 matched = [kw for kw, pat in self.keyword_patterns.items() if pat.search(cleaned_text.lower())]
 
-            # Parse proposals — try table-based extraction first, fall back to text
+            # Parse proposals — try table-based extraction first, validate, then Gemini fallback
             proposals = extract_proposals_via_tables(truncated_pdf) if matched else []
-            if not proposals and matched:
+            if matched and (not proposals or not _proposals_valid(proposals)):
                 from parivesh_auto.gemini_extractor import extract_proposals_via_gemini
                 proposals = extract_proposals_via_gemini(cleaned_text)
             for prop in proposals:
