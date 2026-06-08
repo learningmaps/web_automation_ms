@@ -167,9 +167,9 @@ def extract_proposals_via_tables(pdf_content: bytes) -> list[dict]:
         # Proponent
         p['proponent'] = ' '.join(m['proponent'].split()).strip()
 
-        # State filter: only keep if state matches a Chhattisgarh variant
-        state = p['state'].lower().replace('\n', ' ').strip()
-        if any(v in state for v in CHHATTISGARH_VARIANTS):
+        # Include proposal if any Chhattisgarh variant appears anywhere in the row
+        full_text = ' '.join([m['details'], m['location'], m['meeting_date'], m['proponent']]).lower()
+        if any(v in full_text for v in CHHATTISGARH_VARIANTS):
             results.append(p)
 
     return results
@@ -232,14 +232,18 @@ def extract_agenda_text(pdf_content: bytes) -> str:
 
 
 def _proposals_valid(proposals: list[dict]) -> bool:
-    """Return True only if ALL proposals have valid state=CHHATTISGARH and clean district."""
+    """Return True if ALL proposals mention Chhattisgarh (anywhere in row) and have clean district."""
     DATE_PATTERN = re.compile(r'\d{2}/\d{2}/\d{4}')
     BLEED_WORDS = re.compile(r'LIMITED|PVT|CORPORATION|INDUSTRIES|COMPANY|CONSTRUCTIO', re.IGNORECASE)
     for p in proposals:
-        state = p.get('state', '').strip().upper()
-        district = p.get('district', '').strip()
-        if state != 'CHHATTISGARH':
+        check_fields = [str(p.get(k, '')) for k in (
+            'proposal_no', 'file_no', 'project_name', 'proposal_for',
+            'activity', 'sector', 'state', 'district', 'proponent', 'meeting_date'
+        )]
+        full_text = ' '.join(check_fields).lower()
+        if not any(v in full_text for v in CHHATTISGARH_VARIANTS):
             return False
+        district = p.get('district', '').strip()
         if not district:
             return False
         if DATE_PATTERN.search(district):

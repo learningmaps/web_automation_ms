@@ -39,11 +39,11 @@ Extract every proposal listed in the agenda. Each proposal contains fields such 
 Return a JSON object with a single key "proposals" containing an array of extracted proposals.
 
 CRITICAL RULES:
-1. Only include proposals whose **State field** value (the field explicitly labeled "State:" in the agenda) is Chhattisgarh or a clear variant (Chattisgarh, CG). Do NOT infer the state from the project name, project description, or the district — only use the explicit "State:" field value.
-2. For the "state" field, always use the EXACT uppercase value "CHHATTISGARH".
+1. Include proposals where **Chhattisgarh or a clear variant** (Chattisgarh, CG) appears anywhere in the proposal text: the State field, Project Name, description, or any other field. Do NOT restrict to only the State field.
+2. For the "state" field, preserve the original value from the document as-is (uppercase it).
 3. For the "district" field, always use the EXACT uppercase value (e.g. "RAIPUR", not "Raipur" or "raipur"). Strip spaces around hyphens (e.g. "JANJGIR-CHAMPA" not "JANJGIR- CHAMPA").
 4. If a field value is missing or unclear from the text, use an empty string.
-5. Include ALL proposals from Chhattisgarh — do not skip any.
+5. Include ALL proposals mentioning Chhattisgarh — do not skip any.
 6. The agenda text may use a columnar layout (table format) or paragraph format — handle both."""
 
 
