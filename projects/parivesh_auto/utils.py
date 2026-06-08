@@ -476,7 +476,7 @@ class PariveshScraper:
                     pdf_storage_url = upload_pdf_to_storage(
                         resp.content,
                         "parivesh-pdfs",
-                        f"parivesh/{committee_type}/agendas/{rec_id}.pdf"
+                        f"parivesh/{committee_type}/{rec_id}/agenda.pdf"
                     )
                 except Exception as e:
                     logger.warning(f"Failed to upload PDF for ID {rec_id}: {e}")

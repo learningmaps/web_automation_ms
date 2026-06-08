@@ -17,16 +17,20 @@ for _p in (projects_dir, root_dir):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import psycopg2
 import requests
 from common.storage_utils import upload_pdf_to_storage
 
 BUCKET = "parivesh-pdfs"
 DB_URL = os.getenv("DATABASE_URL")
+DB_PORT = 6543
 
 
 def get_conn():
-    return psycopg2.connect(DB_URL, port=6543)
+    return psycopg2.connect(DB_URL, port=DB_PORT)
 
 
 def backfill_agendas(limit=None):
@@ -53,7 +57,7 @@ def backfill_agendas(limit=None):
             resp.raise_for_status()
             storage_url = upload_pdf_to_storage(
                 resp.content, BUCKET,
-                f"parivesh/{ctype}/agendas/{aid}.pdf"
+                f"parivesh/{ctype}/{aid}/agenda.pdf"
             )
             cur.execute(
                 "UPDATE parivesh.agenda_v3 SET pdf_storage_url = %s WHERE id = %s",
@@ -100,7 +104,7 @@ def backfill_moms(limit=None):
             resp.raise_for_status()
             storage_url = upload_pdf_to_storage(
                 resp.content, BUCKET,
-                f"parivesh/{ctype}/moms/{mom_id}.pdf"
+                f"parivesh/{ctype}/{agenda_id}/mom.pdf"
             )
             cur.execute(
                 "UPDATE parivesh.agenda_v3 SET mom_pdf_storage_url = %s WHERE id = %s",
