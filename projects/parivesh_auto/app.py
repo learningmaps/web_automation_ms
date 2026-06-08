@@ -18,7 +18,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PariveshApp")
 
-PAGE_SIZE = 25
 
 def get_secret(key):
     try:
@@ -372,7 +371,6 @@ def run_parivesh():
             mom_subjects = load_mom_norm_subjects()
             filter_opts = load_proposal_filter_options()
 
-        # Add a key that lets us detect filter changes for pagination reset
         all_states = filter_opts['state']
         all_sectors = filter_opts['sector']
         all_prop_for = filter_opts['proposal_for']
@@ -443,19 +441,8 @@ def run_parivesh():
             )
             filtered_agendas = filtered_agendas[filtered_agendas['id'].isin(matching_ids)]
 
-        # ─── PAGINATION ───
         total_filtered = len(filtered_agendas)
-        total_pages = max(1, (total_filtered + PAGE_SIZE - 1) // PAGE_SIZE)
-
-        if 'page' not in st.session_state:
-            st.session_state.page = 1
-        if st.session_state.page > total_pages:
-            st.session_state.page = total_pages
-
-        current_page = st.session_state.page
-        start_idx = (current_page - 1) * PAGE_SIZE
-        end_idx = start_idx + PAGE_SIZE
-        page_agendas = filtered_agendas.iloc[start_idx:end_idx]
+        page_agendas = filtered_agendas
 
         # ─── METRICS ───
         base_metrics = load_base_metrics()
@@ -484,35 +471,8 @@ def run_parivesh():
             for _, row in moms_df.iterrows():
                 moms_by_subject[row['norm_subject']] = row.to_dict()
 
-        # ─── PAGE NAVIGATION ───
-        st.markdown(f"### Agendas & Proposals (page {current_page} of {total_pages})")
-
-        nav = st.columns([1, 2, 1, 1, 1, 2, 1])
-        with nav[0]:
-            if st.button("◀ First", disabled=(current_page <= 1), use_container_width=True):
-                st.session_state.page = 1
-                st.rerun()
-        with nav[1]:
-            if st.button("◀ Previous", disabled=(current_page <= 1), use_container_width=True):
-                st.session_state.page = current_page - 1
-                st.rerun()
-        with nav[2]:
-            st.write(f"Page **{current_page}**")
-        with nav[3]:
-            dummy = st.number_input("Go to", min_value=1, max_value=total_pages, value=current_page, label_visibility="collapsed", key="page_jump")
-            if dummy != current_page:
-                st.session_state.page = dummy
-                st.rerun()
-        with nav[4]:
-            st.write(f"of **{total_pages}**")
-        with nav[5]:
-            if st.button("Next ▶", disabled=(current_page >= total_pages), use_container_width=True):
-                st.session_state.page = current_page + 1
-                st.rerun()
-        with nav[6]:
-            if st.button("Last ▶", disabled=(current_page >= total_pages), use_container_width=True):
-                st.session_state.page = total_pages
-                st.rerun()
+        # ─── AGENDA CARDS ───
+        st.markdown("### Agendas & Proposals")
 
         # ─── RENDER AGENDA CARDS ───
         cards_shown = 0
@@ -616,27 +576,7 @@ def run_parivesh():
                     st.info("No proposals extracted for this agenda yet.")
 
         if cards_shown == 0:
-            st.info("No agendas match the current filters on this page.")
-
-        # ─── BOTTOM PAGINATION ───
-        st.markdown("---")
-        bnav = st.columns([1, 2, 2, 1])
-        with bnav[0]:
-            if st.button("◀ First", disabled=(current_page <= 1), use_container_width=True, key="bfirst"):
-                st.session_state.page = 1
-                st.rerun()
-        with bnav[1]:
-            if st.button("◀ Previous", disabled=(current_page <= 1), use_container_width=True, key="bprev"):
-                st.session_state.page = current_page - 1
-                st.rerun()
-        with bnav[2]:
-            if st.button("Next ▶", disabled=(current_page >= total_pages), use_container_width=True, key="bnext"):
-                st.session_state.page = current_page + 1
-                st.rerun()
-        with bnav[3]:
-            if st.button("Last ▶", disabled=(current_page >= total_pages), use_container_width=True, key="blast"):
-                st.session_state.page = total_pages
-                st.rerun()
+            st.info("No agendas match the current filters.")
 
         # ─── EXPORT ───
         st.markdown("---")
