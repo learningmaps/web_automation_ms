@@ -482,10 +482,10 @@ def run_parivesh():
             if not rows and isinstance(event.selection, dict):
                 rows = event.selection.get("rows", [])
             if rows:
-                selected_id = filtered_agendas.iloc[rows[0]]['id']
+                selected_id = int(filtered_agendas.iloc[rows[0]]['id'])
 
         if not selected_id and not filtered_agendas.empty:
-            selected_id = filtered_agendas.iloc[0]['id']
+            selected_id = int(filtered_agendas.iloc[0]['id'])
 
         if selected_id is None:
             st.info("No agendas match the current filters.")
