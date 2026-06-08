@@ -43,7 +43,7 @@ def load_agendas():
                statename_derived, matched_keywords, pdffilepath,
                is_processed, processed_on, subject AS raw_subject
         FROM parivesh.agenda_v3
-        WHERE ref_type = 'AGENDA'
+        WHERE ref_type = 'AGENDA' AND matched_keywords IS NOT NULL
         ORDER BY date DESC NULLS LAST
     """
     try:
@@ -102,7 +102,14 @@ def load_mom_norm_subjects():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT DISTINCT norm_subject FROM parivesh.agenda_v3 WHERE ref_type = 'MOM' AND norm_subject IS NOT NULL")
+        cur.execute("""
+            SELECT DISTINCT norm_subject FROM parivesh.agenda_v3
+            WHERE ref_type = 'MOM' AND norm_subject IS NOT NULL
+            AND norm_subject IN (
+                SELECT norm_subject FROM parivesh.agenda_v3
+                WHERE ref_type = 'AGENDA' AND matched_keywords IS NOT NULL
+            )
+        """)
         return set(row[0] for row in cur.fetchall())
     except Exception as e:
         logger.error(f"Error loading MOM subjects: {e}")
@@ -117,7 +124,12 @@ def load_proposal_filter_options():
     options = {}
     try:
         for col in ['state', 'sector', 'proposal_for', 'district']:
-            cur.execute(f"SELECT DISTINCT {col} FROM parivesh.extracted_proposals WHERE {col} IS NOT NULL ORDER BY {col}")
+            cur.execute(f"""
+                SELECT DISTINCT e.{col} FROM parivesh.extracted_proposals e
+                JOIN parivesh.agenda_v3 a ON e.agenda_id = a.id
+                WHERE a.ref_type = 'AGENDA' AND a.matched_keywords IS NOT NULL
+                AND e.{col} IS NOT NULL ORDER BY e.{col}
+            """)
             options[col] = [row[0] for row in cur.fetchall()]
     except Exception as e:
         logger.error(f"Error loading filter options: {e}")
@@ -130,7 +142,7 @@ def load_base_metrics():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE is_processed = 0 AND ref_type = 'AGENDA'")
+        cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE is_processed = 0 AND ref_type = 'AGENDA' AND matched_keywords IS NOT NULL")
         unprocessed = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM parivesh.agenda_v3 WHERE matched_keywords IS NOT NULL AND ref_type = 'AGENDA'")
         keyword_matches = cur.fetchone()[0]
