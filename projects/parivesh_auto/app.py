@@ -378,6 +378,8 @@ def run_parivesh():
         all_prop_for = filter_opts['proposal_for']
         all_districts = filter_opts['district']
         all_committees = sorted(agendas_df['committee_type'].dropna().unique().tolist())
+        all_ag_sectors = sorted(agendas_df['sector_name'].dropna().unique().tolist())
+        all_ag_states = sorted(agendas_df['statename_derived'].dropna().unique().tolist())
 
         # ─── AGENDA FILTERS ───
         st.markdown("### Agenda Filters")
@@ -390,6 +392,12 @@ def run_parivesh():
             mom_filter = st.selectbox("MOM Status", options=["All", "With MOM", "Without MOM"], key="ag_mom")
         with af4:
             subject_search = st.text_input("Search Subject", placeholder="Type keywords...", key="ag_subject")
+
+        af5, af6, af7, af8 = st.columns(4)
+        with af5:
+            sel_ag_sector = st.multiselect("Sector", options=all_ag_sectors, key="ag_sector")
+        with af6:
+            sel_ag_state = st.multiselect("State", options=all_ag_states, key="ag_state")
 
         # ─── PROPOSAL FILTERS ───
         st.markdown("### Proposal Filters")
@@ -427,6 +435,10 @@ def run_parivesh():
             filtered_agendas = filtered_agendas[~filtered_agendas['norm_subject'].isin(mom_subjects)]
         if subject_search:
             filtered_agendas = filtered_agendas[filtered_agendas['raw_subject'].str.contains(subject_search, case=False, na=False)]
+        if sel_ag_sector:
+            filtered_agendas = filtered_agendas[filtered_agendas['sector_name'].isin(sel_ag_sector)]
+        if sel_ag_state:
+            filtered_agendas = filtered_agendas[filtered_agendas['statename_derived'].isin(sel_ag_state)]
 
         # Proposal filter flags
         prop_filters_active = bool(sel_state) or bool(sel_sector) or bool(sel_prop_for) or bool(sel_district) or bool(proponent_search) or bool(proposal_search)
