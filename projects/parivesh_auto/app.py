@@ -18,6 +18,8 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PariveshApp")
 
+PAGE_SIZE = 25
+
 def get_secret(key):
     try:
         return st.secrets.get(key) or os.getenv(key)
@@ -94,6 +96,35 @@ def load_moms(norm_subjects):
     finally:
         conn.close()
     return df
+
+def load_mom_norm_subjects():
+    """Fast query: returns a set of norm_subject values that have MOMs."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT DISTINCT norm_subject FROM parivesh.agenda_v3 WHERE ref_type = 'MOM' AND norm_subject IS NOT NULL")
+        return set(row[0] for row in cur.fetchall())
+    except Exception as e:
+        logger.error(f"Error loading MOM subjects: {e}")
+        return set()
+    finally:
+        conn.close()
+
+def load_proposal_filter_options():
+    """Fast queries: returns dict of distinct values for proposal filter dropdowns."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    options = {}
+    try:
+        for col in ['state', 'sector', 'proposal_for', 'district']:
+            cur.execute(f"SELECT DISTINCT {col} FROM parivesh.extracted_proposals WHERE {col} IS NOT NULL ORDER BY {col}")
+            options[col] = [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"Error loading filter options: {e}")
+        options = {'state': [], 'sector': [], 'proposal_for': [], 'district': []}
+    finally:
+        conn.close()
+    return options
 
 def load_base_metrics():
     conn = get_db_connection()
@@ -212,10 +243,10 @@ def run_parivesh():
         st.write("")
         c1, c2, c3 = st.columns([1.2, 1, 1])
         with c1:
-            if st.button("Fetch New Documents", use_container_width=True, help="Downloads the latest meeting agendas and minutes from the Parivesh server."):
+            if st.button("Fetch New Documents", use_container_width=True):
                 st.session_state.is_syncing = True
         with c2:
-            if st.button("Stop Sync", use_container_width=True, help="Safely stops the background sync process."):
+            if st.button("Stop Sync", use_container_width=True):
                 st.session_state.is_syncing = False
         with c3:
             st.write("")
@@ -225,7 +256,7 @@ def run_parivesh():
         with c_gh1:
             limit_gh = st.number_input("Limit (GitHub Action)", min_value=1, max_value=500, value=50, step=10, label_visibility="collapsed")
         with c_gh2:
-            if st.button("Trigger GitHub Action", use_container_width=True, help="Trigger the Parivesh Scraper weekly pipeline on GitHub Actions"):
+            if st.button("Trigger GitHub Action", use_container_width=True):
                 if trigger_parivesh_scrape_workflow(limit=limit_gh):
                     st.toast("GitHub Action triggered successfully!")
                 else:
@@ -277,6 +308,7 @@ def run_parivesh():
 
     # ─── LOAD DATA ───
     try:
+        # Phase 1: load agenda metadata + filter options (both cheap queries)
         with st.spinner("Loading agendas..."):
             agendas_df = load_agendas()
 
@@ -284,31 +316,21 @@ def run_parivesh():
             st.info("No agenda records found. Click 'Fetch New Documents' to begin.")
             return
 
-        # Load proposals and MOMs
-        agenda_ids = agendas_df['id'].tolist()
-        with st.spinner("Loading proposals..."):
-            proposals_df = load_proposals(agenda_ids)
-        with st.spinner("Loading MOM documents..."):
-            norm_subjects = agendas_df['norm_subject'].dropna().tolist()
-            moms_df = load_moms(norm_subjects)
+        with st.spinner("Loading filter options..."):
+            mom_subjects = load_mom_norm_subjects()
+            filter_opts = load_proposal_filter_options()
 
-        # Group proposals by agenda_id
-        proposals_by_agenda = {}
-        if not proposals_df.empty:
-            for _, row in proposals_df.iterrows():
-                proposals_by_agenda.setdefault(row['agenda_id'], []).append(row.to_dict())
-
-        # Group MOMs by norm_subject
-        moms_by_subject = {}
-        if not moms_df.empty:
-            for _, row in moms_df.iterrows():
-                moms_by_subject[row['norm_subject']] = row.to_dict()
+        # Add a key that lets us detect filter changes for pagination reset
+        all_states = filter_opts['state']
+        all_sectors = filter_opts['sector']
+        all_prop_for = filter_opts['proposal_for']
+        all_districts = filter_opts['district']
+        all_committees = sorted(agendas_df['committee_type'].dropna().unique().tolist())
 
         # ─── AGENDA FILTERS ───
         st.markdown("### Agenda Filters")
         af1, af2, af3, af4 = st.columns(4)
         with af1:
-            all_committees = sorted(agendas_df['committee_type'].dropna().unique().tolist())
             sel_committee = st.multiselect("Committee", options=all_committees, key="ag_committee")
         with af2:
             meeting_range = st.date_input("Meeting Date Range", value=[], key="ag_date")
@@ -317,40 +339,17 @@ def run_parivesh():
         with af4:
             subject_search = st.text_input("Search Subject", placeholder="Type keywords...", key="ag_subject")
 
-        # Apply agenda filters
-        filtered_agendas = agendas_df.copy()
-
-        if sel_committee:
-            filtered_agendas = filtered_agendas[filtered_agendas['committee_type'].isin(sel_committee)]
-
-        if len(meeting_range) == 2:
-            sd, ed = meeting_range
-            dates = pd.to_datetime(filtered_agendas['date'], errors='coerce').dt.date
-            filtered_agendas = filtered_agendas[(dates >= sd) & (dates <= ed)]
-
-        if mom_filter == "With MOM":
-            filtered_agendas = filtered_agendas[filtered_agendas['norm_subject'].isin(moms_by_subject.keys())]
-        elif mom_filter == "Without MOM":
-            filtered_agendas = filtered_agendas[~filtered_agendas['norm_subject'].isin(moms_by_subject.keys())]
-
-        if subject_search:
-            filtered_agendas = filtered_agendas[filtered_agendas['raw_subject'].str.contains(subject_search, case=False, na=False)]
-
         # ─── PROPOSAL FILTERS ───
         st.markdown("### Proposal Filters")
         pf1, pf2, pf3, pf4 = st.columns(4)
         with pf1:
-            all_states = sorted(proposals_df['state'].dropna().unique().tolist()) if not proposals_df.empty else []
             default_state = ['Chhattisgarh'] if 'Chhattisgarh' in all_states else []
             sel_state = st.multiselect("State", options=all_states, default=default_state, key="pr_state")
         with pf2:
-            all_sectors = sorted(proposals_df['sector'].dropna().unique().tolist()) if not proposals_df.empty else []
             sel_sector = st.multiselect("Sector", options=all_sectors, key="pr_sector")
         with pf3:
-            all_prop_for = sorted(proposals_df['proposal_for'].dropna().unique().tolist()) if not proposals_df.empty else []
             sel_prop_for = st.multiselect("Proposal For", options=all_prop_for, key="pr_prop_for")
         with pf4:
-            all_districts = sorted(proposals_df['district'].dropna().unique().tolist()) if not proposals_df.empty else []
             sel_district = st.multiselect("District", options=all_districts, key="pr_district")
 
         pf5, pf6, pf7 = st.columns([1, 1, 1])
@@ -361,29 +360,103 @@ def run_parivesh():
         with pf7:
             st.write("")
             st.write("")
-            total_proposals = len(proposals_df)
-            st.markdown(f"**{len(filtered_agendas)}** agendas · **{total_proposals}** proposals")
+            st.markdown(f"**{len(agendas_df)}** total agendas")
 
-        # Determine if any proposal filter is active
+        # ─── APPLY AGENDA FILTERS ───
+        filtered_agendas = agendas_df.copy()
+        if sel_committee:
+            filtered_agendas = filtered_agendas[filtered_agendas['committee_type'].isin(sel_committee)]
+        if len(meeting_range) == 2:
+            sd, ed = meeting_range
+            dates = pd.to_datetime(filtered_agendas['date'], errors='coerce').dt.date
+            filtered_agendas = filtered_agendas[(dates >= sd) & (dates <= ed)]
+        if mom_filter == "With MOM":
+            filtered_agendas = filtered_agendas[filtered_agendas['norm_subject'].isin(mom_subjects)]
+        elif mom_filter == "Without MOM":
+            filtered_agendas = filtered_agendas[~filtered_agendas['norm_subject'].isin(mom_subjects)]
+        if subject_search:
+            filtered_agendas = filtered_agendas[filtered_agendas['raw_subject'].str.contains(subject_search, case=False, na=False)]
+
+        # Proposal filter flags (for resetting page and checking if active)
         prop_filters_active = bool(sel_state) or bool(sel_sector) or bool(sel_prop_for) or bool(sel_district) or bool(proponent_search) or bool(proposal_search)
+
+        # ─── PAGINATION ───
+        total_filtered = len(filtered_agendas)
+        total_pages = max(1, (total_filtered + PAGE_SIZE - 1) // PAGE_SIZE)
+
+        if 'page' not in st.session_state:
+            st.session_state.page = 1
+        if st.session_state.page > total_pages:
+            st.session_state.page = total_pages
+
+        current_page = st.session_state.page
+        start_idx = (current_page - 1) * PAGE_SIZE
+        end_idx = start_idx + PAGE_SIZE
+        page_agendas = filtered_agendas.iloc[start_idx:end_idx]
 
         # ─── METRICS ───
         base_metrics = load_base_metrics()
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Agendas", len(filtered_agendas))
-        m2.metric("With MOM", len(filtered_agendas[filtered_agendas['norm_subject'].isin(moms_by_subject.keys())]))
+        m1.metric("Agendas", total_filtered)
+        m2.metric("With MOM", len(filtered_agendas[filtered_agendas['norm_subject'].isin(mom_subjects)]))
         m3.metric("Unprocessed", base_metrics["unprocessed"])
         m4.metric("Keyword Matches", base_metrics["keyword_matches"])
 
-        # ─── RENDER AGENDA CARDS ───
-        st.markdown(f"### Agendas & Proposals ({len(filtered_agendas)} agendas shown)")
+        # ─── LOAD CURRENT PAGE DATA (proposals + MOMs only for this page) ───
+        page_ids = page_agendas['id'].tolist()
+        page_norm_subjects = page_agendas['norm_subject'].dropna().tolist()
 
+        with st.spinner("Loading proposals for this page..."):
+            proposals_df = load_proposals(page_ids)
+        with st.spinner("Loading MOM documents for this page..."):
+            moms_df = load_moms(page_norm_subjects)
+
+        proposals_by_agenda = {}
+        if not proposals_df.empty:
+            for _, row in proposals_df.iterrows():
+                proposals_by_agenda.setdefault(row['agenda_id'], []).append(row.to_dict())
+
+        moms_by_subject = {}
+        if not moms_df.empty:
+            for _, row in moms_df.iterrows():
+                moms_by_subject[row['norm_subject']] = row.to_dict()
+
+        # ─── PAGE NAVIGATION ───
+        st.markdown(f"### Agendas & Proposals (page {current_page} of {total_pages})")
+
+        nav = st.columns([1, 2, 1, 1, 1, 2, 1])
+        with nav[0]:
+            if st.button("◀ First", disabled=(current_page <= 1), use_container_width=True):
+                st.session_state.page = 1
+                st.rerun()
+        with nav[1]:
+            if st.button("◀ Previous", disabled=(current_page <= 1), use_container_width=True):
+                st.session_state.page = current_page - 1
+                st.rerun()
+        with nav[2]:
+            st.write(f"Page **{current_page}**")
+        with nav[3]:
+            dummy = st.number_input("Go to", min_value=1, max_value=total_pages, value=current_page, label_visibility="collapsed", key="page_jump")
+            if dummy != current_page:
+                st.session_state.page = dummy
+                st.rerun()
+        with nav[4]:
+            st.write(f"of **{total_pages}**")
+        with nav[5]:
+            if st.button("Next ▶", disabled=(current_page >= total_pages), use_container_width=True):
+                st.session_state.page = current_page + 1
+                st.rerun()
+        with nav[6]:
+            if st.button("Last ▶", disabled=(current_page >= total_pages), use_container_width=True):
+                st.session_state.page = total_pages
+                st.rerun()
+
+        # ─── RENDER AGENDA CARDS ───
         cards_shown = 0
-        for _, agenda in filtered_agendas.iterrows():
+        for _, agenda in page_agendas.iterrows():
             aid = agenda['id']
             agenda_proposals = proposals_by_agenda.get(aid, [])
 
-            # Apply proposal filters (except state is already active by default)
             filtered_props = agenda_proposals
             if sel_state:
                 filtered_props = [p for p in filtered_props if p.get('state') in sel_state]
@@ -400,13 +473,11 @@ def run_parivesh():
                 q = proposal_search.lower()
                 filtered_props = [p for p in filtered_props if q in (p.get('proposal_no', '') or '').lower()]
 
-            # If proposal filters are active and no proposals match, skip this agenda card
             if prop_filters_active and not filtered_props:
                 continue
 
             cards_shown += 1
 
-            # Resolve MOM
             mom = moms_by_subject.get(agenda['norm_subject'])
             mom_badge = ""
             if mom:
@@ -425,7 +496,6 @@ def run_parivesh():
             label = f"{meeting_date} · {committee} · {n_props} proposal(s) · {agenda.get('statename_derived', '') or ''}"
 
             with st.expander(label, expanded=expanded):
-                # Metadata row
                 meta_cols = st.columns([2, 1, 1])
                 with meta_cols[0]:
                     st.markdown(f"**Meeting ID:** {agenda.get('meeting_id', 'N/A') or 'N/A'}")
@@ -443,7 +513,6 @@ def run_parivesh():
                         if mom_pdf and pd.notna(mom_pdf):
                             st.link_button("📄 View MOM PDF", mom_pdf, use_container_width=True)
 
-                # MOM details section
                 st.markdown("---")
                 if mom:
                     st.markdown("##### Minutes of Meeting")
@@ -458,7 +527,6 @@ def run_parivesh():
                 else:
                     st.markdown("*No MOM document linked to this agenda.*")
 
-                # Proposals section
                 st.markdown("---")
                 st.markdown(f"##### Proposals ({n_props})")
                 if filtered_props:
@@ -484,10 +552,34 @@ def run_parivesh():
                 else:
                     st.info("No proposals extracted for this agenda yet.")
 
+        if cards_shown == 0:
+            st.info("No agendas match the current filters on this page.")
+
+        # ─── BOTTOM PAGINATION ───
+        st.markdown("---")
+        bnav = st.columns([1, 2, 2, 1])
+        with bnav[0]:
+            if st.button("◀ First", disabled=(current_page <= 1), use_container_width=True, key="bfirst"):
+                st.session_state.page = 1
+                st.rerun()
+        with bnav[1]:
+            if st.button("◀ Previous", disabled=(current_page <= 1), use_container_width=True, key="bprev"):
+                st.session_state.page = current_page - 1
+                st.rerun()
+        with bnav[2]:
+            if st.button("Next ▶", disabled=(current_page >= total_pages), use_container_width=True, key="bnext"):
+                st.session_state.page = current_page + 1
+                st.rerun()
+        with bnav[3]:
+            if st.button("Last ▶", disabled=(current_page >= total_pages), use_container_width=True, key="blast"):
+                st.session_state.page = total_pages
+                st.rerun()
+
         # ─── EXPORT ───
+        st.markdown("---")
         output = io.BytesIO()
         export_df = filtered_agendas.copy()
-        export_df['has_mom'] = export_df['norm_subject'].isin(moms_by_subject.keys())
+        export_df['has_mom'] = export_df['norm_subject'].isin(mom_subjects)
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             export_df.to_excel(writer, index=False, sheet_name='Agendas')
             workbook = writer.book
@@ -506,20 +598,17 @@ def run_parivesh():
                 worksheet.set_column(col_num, col_num, width, cell_fmt)
 
         st.download_button(
-            label="Download Agendas as Excel",
+            label="Download All Filtered Agendas as Excel",
             data=output.getvalue(),
             file_name=f"parivesh_agendas_{int(time.time())}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
-        if cards_shown == 0:
-            st.info("No agendas match the current filters.")
-
     except Exception as e:
         st.error("A critical error occurred in the application UI.")
         st.exception(e)
-        if st.button("Reset App State", help="Clears internal session state and reruns the app to resolve persistent errors."):
+        if st.button("Reset App State"):
             st.session_state.clear()
             st.rerun()
 
