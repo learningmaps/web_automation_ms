@@ -62,13 +62,25 @@ graph TD
   - **Scraped URLs**: Tracks the discovery and status of every PDF.
   - **Mine Block Summaries**: Shows extracted geological and land data.
   - **Tenders (NIT)**: Shows auction schedules and individual mineral blocks.
+  - **Corrigendum & Addendum**: Shows document-level corrections with block-level changes.
 
 ### 2.3 Parivesh Portal (`projects/parivesh_auto/app.py`)
 - **Controls**:
   - **Fetch New Documents**: Runs a local sync process to download metadata and PDFs from the Parivesh server.
   - **Refresh View**: Manually refreshes the PostgreSQL Materialized View for updated consolidation.
-- **Filters**: Advanced filtering by State, Committee Type, Keywords, and Date ranges.
-- **Data Table**: Displays a consolidated view of Agendas and Minutes of Meetings (MOM).
+- **Agenda Filters**:
+  - Committee (multiselect), Meeting Date Range, Meeting Start Date Range, Processed On Date Range
+  - MOM Status (All/With/Without), Subject Search, Sector, State
+- **Proposal Filters**:
+  - State, Sector, Proposal For, District (multiselect dropdowns)
+  - Proponent text search, Proposal No text search
+- **Metrics Row**: Agendas count, With MOM count, Unprocessed count, Keyword Matches.
+- **Export Button** (`⬇ Excel`): Positioned directly above the agenda table for quick access.
+- **Agenda Table**: 10 columns — Date, Meeting Start, Meeting ID, Committee, Subject (truncated 80ch), Sector, State, MOM (✓/✗), Keywords, Processed On.
+- **Master-Detail Workflow**: Selecting a row shows Agenda Details, Minutes of Meeting (if linked), and Proposal cards below.
+- **Excel Export (two sheets)**:
+  - **Sheet "Proposal Details"**: Denormalized — one row per proposal with agenda context and linked MOM info merged in.
+  - **Sheet "Agendas Summary"**: One row per agenda with proposal count and MOM status.
 
 ### 2.4 Bastar Court Portal (`projects/bdc_scrape/app.py`)
 - **Metrics Bar**: Displays total cases, pending vs disposed, and the "Data Last Synced" timestamp.
@@ -110,10 +122,11 @@ graph TD
 3. **Storage**: Initial metadata is stored in `parivesh.agenda_v3`.
 
 ### Stage 2: Document Processing & Consolidation
-1. **PDF Sync**: The scraper downloads the associated Agenda and MOM PDFs.
-2. **Keyword Matching**: Subject lines and PDF text are extracted using `PyMuPDF` and scanned for specific monitoring keywords.
-3. **Consolidation**: A PostgreSQL Materialized View (`parivesh.mv_consolidated_projects`) joins related Agendas and MOMs based on meeting IDs.
-4. **Visualization**: Streamlit fetches from this view to present a unified project timeline.
+1. **PDF Sync**: The scraper downloads the associated Agenda and MOM PDFs and uploads them to Supabase Storage (`parivesh-pdfs` bucket).
+2. **Keyword Matching**: Subject lines and PDF text are extracted using `PyMuPDF` and scanned for Chhattisgarh-specific monitoring keywords (with multiple spelling variants for each district).
+3. **Proposal Extraction**: A two-tier strategy extracts proposal details from agenda PDFs — table-based extraction via `PyMuPDF` `find_tables()`, with **Gemini LLM** fallback for complex layouts. Results are stored in `parivesh.extracted_proposals`.
+4. **Consolidation**: A PostgreSQL Materialized View (`parivesh.mv_consolidated_projects`) joins related Agendas and MOMs based on `norm_subject`.
+5. **Visualization**: Streamlit fetches from `agenda_v3` and `extracted_proposals` to present a unified master-detail view with exportable Excel reports.
 
 ---
 
@@ -158,24 +171,33 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 - **Schema `mstc`**:
   - `processed_pdfs`: Master registry of all discovered files.
   - `mine_block_summaries`: Detailed geological/resource data.
-  - `tenders_nit` & `tender_blocks`: Auction-related information.
+  - `tenders_nit` & `tender_blocks`: Auction information.
+  - `corrigendum_addendum` & `corrigendum_blocks`: Corrigendum documents and their block-level changes.
 - **Schema `parivesh`**:
-  - `agenda_v3`: Flat table containing metadata, keyword matches, and raw text.
-  - `mv_consolidated_projects`: Materialized view for cross-referencing documents.
+  - `agenda_v3`: Flat table containing metadata (ref_type `AGENDA` or `MOM`), keyword matches, extracted text, PDF storage URLs, and normalized subjects for cross-linking.
+  - `extracted_proposals`: Proposals extracted from agenda PDFs, linked to `agenda_v3(id)` via `agenda_id`.
+  - `mv_consolidated_projects`: Materialized view joining agendas and MOMs by `norm_subject`.
 - **Schema `bdc`**:
-  - `cases`: Main case details (CNR, Case Type, Case Year, Establishment Code, Petitioner, Respondent, Status, Next Hearing Date).
-  - `case_history`: Detailed logs of hearings, stages, and business history.
+  - `cases`: Main case details (CNR, Case Type, Case Year, Petitioner, Respondent, Status, Next Hearing Date).
+  - `case_history`: Hearing logs with judge, purpose, and business text.
+  - `case_orders`: PDF interim/final orders with storage paths.
 
 ### Shared Logic
 - **`common/document_processing.py`**: Standardized PDF-to-text extraction using `PyMuPDF`.
-- **`GEMINI.md`**: Project-wide mandates for extraction models, visual identity (Streamlit Red `#ff4b4b`), and directory structure.
+- **`common/gemini_utils.py`**: Shared Gemini LLM extraction with model fallback and key rotation.
+- **`common/storage_utils.py`**: Shared Supabase Storage upload utility.
 
 ### External Integrations
 - **GitHub Actions**: Offloads heavy scraper metadata fetching and PDF processing tasks to GitHub's infrastructure (MSTC, Bastar Court, and Parivesh scrapers) to avoid Streamlit timeout limits.
 - **Google Gemini API**: Provides high-reasoning extraction capabilities with deterministic output (`temperature=0.0`) and solves scraper CAPTCHAs.
+- **Supabase Storage**: Three buckets (`parivesh-pdfs`, `mstc-pdfs`, `court-documents`) for storing scraped PDFs with public URLs.
 
 ### Verification Utilities
 - **`supabase/functions/test-waf`**: A utility Edge Function designed to test direct HTTP requests from Supabase cloud environments to the Bastar Court website to verify WAF geoblocking behaviour.
+
+### opencode Project Configuration
+- **`opencode.json`**: Registers `AGENTS.md` as project-wide instructions for opencode's LLM agent.
+- **`AGENTS.md`**: Documents column name mappings (e.g., `subject` → `raw_subject`) and export sheet field lists to prevent naming mistakes when editing dashboard code.
 
 ## 6. Security Architecture
 
