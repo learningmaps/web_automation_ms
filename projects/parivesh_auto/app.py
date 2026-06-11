@@ -429,6 +429,16 @@ def run_parivesh():
         with af6:
             sel_ag_state = st.multiselect("State", options=all_ag_states, key="ag_state")
 
+        af9, af10, af11, af12 = st.columns(4)
+        with af9:
+            mtg_start_range = st.date_input("Meeting Start Date Range", value=[], key="ag_mtg_start")
+        with af10:
+            processed_range = st.date_input("Processed On Date Range", value=[], key="ag_processed")
+        with af11:
+            st.write("")
+        with af12:
+            st.write("")
+
         # ─── PROPOSAL FILTERS ───
         st.markdown("### Proposal Filters")
         pf1, pf2, pf3, pf4 = st.columns(4)
@@ -469,6 +479,14 @@ def run_parivesh():
             filtered_agendas = filtered_agendas[filtered_agendas['sector_name'].isin(sel_ag_sector)]
         if sel_ag_state:
             filtered_agendas = filtered_agendas[filtered_agendas['statename_derived'].isin(sel_ag_state)]
+        if len(mtg_start_range) == 2:
+            sd, ed = mtg_start_range
+            dates = pd.to_datetime(filtered_agendas['meeting_start_date'], errors='coerce').dt.date
+            filtered_agendas = filtered_agendas[(dates >= sd) & (dates <= ed)]
+        if len(processed_range) == 2:
+            sd, ed = processed_range
+            dates = pd.to_datetime(filtered_agendas['processed_on'], errors='coerce').dt.date
+            filtered_agendas = filtered_agendas[(dates >= sd) & (dates <= ed)]
 
         # Proposal filter flags
         prop_filters_active = bool(sel_state) or bool(sel_sector) or bool(sel_prop_for) or bool(sel_district) or bool(proponent_search) or bool(proposal_search)
@@ -495,6 +513,107 @@ def run_parivesh():
         m3.metric("Unprocessed", base_metrics["unprocessed"])
         m4.metric("Keyword Matches", base_metrics["keyword_matches"])
 
+        # ─── EXPORT ───
+        export_output = io.BytesIO()
+
+        # Load proposals and MOMs for the filtered set
+        filtered_ids = filtered_agendas['id'].tolist()
+        filtered_norm_subjects = filtered_agendas['norm_subject'].dropna().unique().tolist()
+        export_proposals = load_proposals(filtered_ids)
+        export_moms = load_moms(filtered_norm_subjects)
+
+        # ── Sheet 1: Proposal Details ──
+        if not export_proposals.empty:
+            agenda_map = filtered_agendas[[
+                'id', 'meeting_id', 'committee_type', 'date', 'subject',
+                'meeting_start_date', 'meeting_end_date', 'sector_name',
+                'statename_derived', 'matched_keywords', 'pdffilepath',
+                'norm_subject'
+            ]].rename(columns={
+                'id': 'agenda_id',
+                'date': 'agenda_date',
+                'subject': 'agenda_subject',
+                'pdffilepath': 'agenda_pdf_url',
+            })
+
+            prop_detail = export_proposals.merge(agenda_map, on='agenda_id', how='left')
+
+            if not export_moms.empty:
+                mom_map = export_moms[[
+                    'norm_subject', 'date', 'meeting_id', 'raw_subject', 'pdf_storage_url'
+                ]].rename(columns={
+                    'date': 'mom_date', 'meeting_id': 'mom_meeting_id',
+                    'raw_subject': 'mom_subject', 'pdf_storage_url': 'mom_pdf_url',
+                })
+                mom_map = mom_map.drop_duplicates(subset=['norm_subject'])
+                prop_detail = prop_detail.merge(mom_map, on='norm_subject', how='left')
+            else:
+                for c in ['mom_date', 'mom_meeting_id', 'mom_subject', 'mom_pdf_url']:
+                    prop_detail[c] = None
+
+            prop_detail['has_mom'] = prop_detail['mom_date'].notna()
+
+            prop_cols = [
+                'agenda_id', 'meeting_id', 'committee_type', 'agenda_date',
+                'meeting_start_date', 'meeting_end_date', 'agenda_subject',
+                'sector_name', 'statename_derived', 'matched_keywords',
+                'sr_no', 'proposal_no', 'file_no', 'project_name',
+                'proposal_for', 'activity', 'sector', 'state',
+                'district', 'proponent',
+                'has_mom', 'mom_date', 'mom_meeting_id', 'mom_subject',
+                'agenda_pdf_url', 'mom_pdf_url',
+            ]
+            prop_detail = prop_detail[[c for c in prop_cols if c in prop_detail.columns]]
+        else:
+            prop_detail = pd.DataFrame()
+
+        # ── Sheet 2: Agendas Summary ──
+        agendas_summary = filtered_agendas[[
+            'id', 'meeting_id', 'date', 'committee_type', 'subject',
+            'sector_name', 'statename_derived', 'matched_keywords',
+            'pdffilepath', 'mom_pdf_storage_url'
+        ]].rename(columns={
+            'id': 'agenda_id',
+            'subject': 'agenda_subject',
+            'pdffilepath': 'agenda_pdf_url',
+        })
+        agendas_summary['has_mom'] = agendas_summary['agenda_id'].isin(
+            filtered_agendas[filtered_agendas['norm_subject'].isin(mom_subjects)]['id']
+        )
+        if not export_proposals.empty:
+            prop_counts = export_proposals.groupby('agenda_id').size().reset_index(name='proposal_count')
+            agendas_summary = agendas_summary.merge(prop_counts, on='agenda_id', how='left')
+            agendas_summary['proposal_count'] = agendas_summary['proposal_count'].fillna(0).astype(int)
+        else:
+            agendas_summary['proposal_count'] = 0
+
+        # ── Write Excel ──
+        with pd.ExcelWriter(export_output, engine='xlsxwriter') as writer:
+            sheet_configs = []
+            if not prop_detail.empty:
+                prop_detail.to_excel(writer, index=False, sheet_name='Proposal Details')
+                sheet_configs.append(('Proposal Details', prop_detail))
+            agendas_summary.to_excel(writer, index=False, sheet_name='Agendas Summary')
+            sheet_configs.append(('Agendas Summary', agendas_summary))
+
+            workbook = writer.book
+            header_fmt = workbook.add_format({
+                'bold': True, 'text_wrap': False, 'valign': 'vcenter',
+                'fg_color': '#1F4E78', 'font_color': 'white', 'border': 1
+            })
+            cell_fmt = workbook.add_format({'valign': 'top', 'text_wrap': False, 'border': 1})
+            wide_cols = {'agenda_subject', 'mom_subject', 'agenda_pdf_url', 'mom_pdf_url'}
+
+            for sheet_name, df in sheet_configs:
+                ws = writer.sheets[sheet_name]
+                ws.set_default_row(20)
+                ws.freeze_panes(1, 0)
+                ws.autofilter(0, 0, len(df), len(df.columns) - 1)
+                for col_num, col_name in enumerate(df.columns):
+                    ws.write(0, col_num, col_name, header_fmt)
+                    width = 40 if col_name in wide_cols else 20
+                    ws.set_column(col_num, col_num, width, cell_fmt)
+
         # ─── AGENDA TABLE ───
         display_df = filtered_agendas.copy()
         display_df['_mom_status'] = display_df['norm_subject'].apply(
@@ -504,11 +623,25 @@ def run_parivesh():
             lambda x: (str(x)[:80] + '...') if x and len(str(x)) > 80 else (str(x) if x else '')
         )
 
-        table_cols = ['date', 'committee_type', '_subject_short', '_mom_status', 'statename_derived']
+        table_cols = ['date', 'meeting_start_date', 'meeting_id', 'committee_type',
+                      '_subject_short', 'sector_name', 'statename_derived',
+                      '_mom_status', 'matched_keywords', 'processed_on']
         table_df = display_df[table_cols].copy()
-        table_df.columns = ['Date', 'Committee', 'Subject', 'MOM', 'State']
+        table_df.columns = ['Date', 'Meeting Start', 'Meeting ID', 'Committee',
+                            'Subject', 'Sector', 'State',
+                            'MOM', 'Keywords', 'Processed On']
 
-        st.markdown("### Agendas")
+        export_col1, export_col2 = st.columns([1, 5])
+        with export_col1:
+            st.download_button(
+                label="⬇ Excel",
+                data=export_output.getvalue(),
+                file_name=f"parivesh_agendas_{int(time.time())}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        with export_col2:
+            st.markdown(f"### Agendas ({total_filtered})")
         event = st.dataframe(
             table_df,
             use_container_width=True,
@@ -625,36 +758,6 @@ def run_parivesh():
                                 st.markdown(f"**Meeting ID:** {prop.get('meeting_id', 'N/A') or 'N/A'}")
                 else:
                     st.info("No proposals extracted for this agenda yet.")
-
-        # ─── EXPORT ───
-        st.markdown("---")
-        output = io.BytesIO()
-        export_df = filtered_agendas.copy()
-        export_df['has_mom'] = export_df['norm_subject'].isin(mom_subjects)
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            export_df.to_excel(writer, index=False, sheet_name='Agendas')
-            workbook = writer.book
-            worksheet = writer.sheets['Agendas']
-            header_fmt = workbook.add_format({
-                'bold': True, 'text_wrap': False, 'valign': 'vcenter',
-                'fg_color': '#1F4E78', 'font_color': 'white', 'border': 1
-            })
-            cell_fmt = workbook.add_format({'valign': 'top', 'text_wrap': False, 'border': 1})
-            worksheet.set_default_row(20)
-            worksheet.freeze_panes(1, 0)
-            worksheet.autofilter(0, 0, len(export_df), len(export_df.columns) - 1)
-            for col_num, value in enumerate(export_df.columns.values):
-                worksheet.write(0, col_num, value, header_fmt)
-                width = 40 if value in ['raw_subject', 'norm_subject'] else 20
-                worksheet.set_column(col_num, col_num, width, cell_fmt)
-
-        st.download_button(
-            label="Download All Filtered Agendas as Excel",
-            data=output.getvalue(),
-            file_name=f"parivesh_agendas_{int(time.time())}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
 
     except Exception as e:
         st.error("A critical error occurred in the application UI.")
