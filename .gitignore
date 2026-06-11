@@ -7,6 +7,10 @@ venv/
 ENV/
 env/
 .env
+*.xlsx
+
+# Generated export files
+excel_files/
 
 # Node
 node_modules/
