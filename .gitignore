@@ -21,6 +21,12 @@ dist/
 .idea/
 .gemini/
 
+# Dev containers
+.devcontainer/
+
+# Binary docs
+*.ods
+
 # Streamlit
 .streamlit/secrets.toml
 
