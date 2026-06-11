@@ -525,14 +525,14 @@ def run_parivesh():
         # ── Sheet 1: Proposal Details ──
         if not export_proposals.empty:
             agenda_map = filtered_agendas[[
-                'id', 'meeting_id', 'committee_type', 'date', 'subject',
+                'id', 'meeting_id', 'committee_type', 'date', 'raw_subject',
                 'meeting_start_date', 'meeting_end_date', 'sector_name',
                 'statename_derived', 'matched_keywords', 'pdffilepath',
                 'norm_subject'
             ]].rename(columns={
                 'id': 'agenda_id',
                 'date': 'agenda_date',
-                'subject': 'agenda_subject',
+                'raw_subject': 'agenda_subject',
                 'pdffilepath': 'agenda_pdf_url',
             })
 
@@ -569,12 +569,12 @@ def run_parivesh():
 
         # ── Sheet 2: Agendas Summary ──
         agendas_summary = filtered_agendas[[
-            'id', 'meeting_id', 'date', 'committee_type', 'subject',
+            'id', 'meeting_id', 'date', 'committee_type', 'raw_subject',
             'sector_name', 'statename_derived', 'matched_keywords',
             'pdffilepath', 'mom_pdf_storage_url'
         ]].rename(columns={
             'id': 'agenda_id',
-            'subject': 'agenda_subject',
+            'raw_subject': 'agenda_subject',
             'pdffilepath': 'agenda_pdf_url',
         })
         agendas_summary['has_mom'] = agendas_summary['agenda_id'].isin(
