@@ -23,14 +23,14 @@ jobs:
           DATABASE_URL_INDIA: ${{ secrets.DATABASE_URL_INDIA }}
         run: |
           python -c "
-import os, psycopg2
-for key in ['DATABASE_URL', 'DATABASE_URL_INDIA']:
-    try:
-        conn = psycopg2.connect(os.environ[key])
-        conn.cursor().execute('SELECT 1')
-        conn.close()
-        print(f'{key}: OK')
-    except Exception as e:
-        print(f'{key}: FAILED - {e}')
-        raise
-"
+          import os, psycopg2
+          for key in ['DATABASE_URL', 'DATABASE_URL_INDIA']:
+              try:
+                  conn = psycopg2.connect(os.environ[key])
+                  conn.cursor().execute('SELECT 1')
+                  conn.close()
+                  print(f'{key}: OK')
+              except Exception as e:
+                  print(f'{key}: FAILED - {e}')
+                  raise
+          "
