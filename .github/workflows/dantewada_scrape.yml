@@ -1,0 +1,35 @@
+name: Dantewada & Forest CG PDF Scraper
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Monday at 3 PM UTC
+    - cron: '0 15 * * 1'
+
+jobs:
+  scrape-and-extract:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Dantewada/Forest CG Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_INDIA: ${{ secrets.DATABASE_URL_INDIA }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: .
+        run: python projects/dantewada_scrape/main.py --mode full --limit 20

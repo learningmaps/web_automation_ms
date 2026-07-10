@@ -113,6 +113,7 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_mstc"],
     div[data-testid="stColumn"] button[key="nav_parivesh"],
     div[data-testid="stColumn"] button[key="nav_bdc"],
+    div[data-testid="stColumn"] button[key="nav_dantewada"],
     div[data-testid="stColumn"] button[key="nav_refresh"] {
         width: 44px !important;
         height: 44px !important;
@@ -130,7 +131,9 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_parivesh"] [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_parivesh"] span:first-child,
     div[data-testid="stColumn"] button[key="nav_bdc"] [data-testid="stIconMaterial"],
-    div[data-testid="stColumn"] button[key="nav_bdc"] span:first-child {
+    div[data-testid="stColumn"] button[key="nav_bdc"] span:first-child,
+    div[data-testid="stColumn"] button[key="nav_dantewada"] [data-testid="stIconMaterial"],
+    div[data-testid="stColumn"] button[key="nav_dantewada"] span:first-child {
         color: #ff4b4b !important;
         display: flex !important;
         align-items: center !important;
@@ -156,7 +159,9 @@ st.markdown("""
     div[data-testid="stColumn"] button[key="nav_parivesh"]:hover [data-testid="stIconMaterial"],
     div[data-testid="stColumn"] button[key="nav_parivesh"]:hover span:first-child,
     div[data-testid="stColumn"] button[key="nav_bdc"]:hover [data-testid="stIconMaterial"],
-    div[data-testid="stColumn"] button[key="nav_bdc"]:hover span:first-child {
+    div[data-testid="stColumn"] button[key="nav_bdc"]:hover span:first-child,
+    div[data-testid="stColumn"] button[key="nav_dantewada"]:hover [data-testid="stIconMaterial"],
+    div[data-testid="stColumn"] button[key="nav_dantewada"]:hover span:first-child {
         color: white !important;
     }
     /* Refresh Hover Effect */
@@ -174,7 +179,8 @@ def get_hub_metrics():
     metrics = {
         "mstc_blocks": 0, "mstc_total": 0, "mstc_7d": 0,
         "parivesh_hits": 0, "parivesh_total": 0, "parivesh_7d": 0,
-        "bdc_total": 0, "bdc_pending": 0, "bdc_7d": 0
+        "bdc_total": 0, "bdc_pending": 0, "bdc_7d": 0,
+        "dn_total": 0, "dn_processed": 0, "dn_7d": 0
     }
     if not db_url: return metrics
     
@@ -207,6 +213,14 @@ def get_hub_metrics():
         metrics["bdc_pending"] = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM bdc.cases WHERE last_synced::timestamp > NOW() - INTERVAL '7 days'")
         metrics["bdc_7d"] = cur.fetchone()[0]
+
+        # --- Diversions & Notifications Group ---
+        cur.execute("SELECT COUNT(*) FROM diversions_and_notifications.processed_pdfs")
+        metrics["dn_total"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM diversions_and_notifications.processed_pdfs WHERE status = 'processed'")
+        metrics["dn_processed"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM diversions_and_notifications.processed_pdfs WHERE extracted_at::timestamp > NOW() - INTERVAL '7 days'")
+        metrics["dn_7d"] = cur.fetchone()[0]
         
         conn.close()
     except Exception:
@@ -223,7 +237,7 @@ def go_home():
 
 # ─── TOP NAVIGATION ───
 if st.session_state.active_app:
-    c1, c2, c3, c4, c5, _ = st.columns([1, 1, 1, 1, 1, 21])
+    c1, c2, c3, c4, c5, c6, _ = st.columns([1, 1, 1, 1, 1, 1, 18])
     with c1:
         if st.button("", icon=":material/home:", help="Home", key="nav_home"):
             go_home()
@@ -240,6 +254,10 @@ if st.session_state.active_app:
             st.session_state.active_app = "bdc"
             st.rerun()
     with c5:
+        if st.button("", icon=":material/article:", help="Notifications Dashboard", key="nav_dantewada"):
+            st.session_state.active_app = "dantewada"
+            st.rerun()
+    with c6:
         if st.button("", icon=":material/refresh:", help="Refresh Data", key="nav_refresh"):
             st.rerun()
 
@@ -256,6 +274,10 @@ elif st.session_state.active_app == "bdc":
     from bdc_scrape.app import run_bdc
     run_bdc()
 
+elif st.session_state.active_app == "dantewada":
+    from dantewada_scrape.app import run_dantewada
+    run_dantewada()
+
 else:
     # ─── WEB AUTOMATIONS HUB ───
     st.markdown('<div class="main-title">Web Automations</div>', unsafe_allow_html=True)
@@ -265,7 +287,7 @@ else:
     st.write("") 
 
     # ─── PROJECT TILES ───
-    col1, col2, col3 = st.columns(3, gap="medium")
+    col1, col2, col3, col4 = st.columns(4, gap="medium")
 
     with col1:
         st.markdown("""
@@ -304,6 +326,19 @@ else:
         """, unsafe_allow_html=True)
         if st.button("Launch BDC Portal", key="btn_bdc", use_container_width=True):
             st.session_state.active_app = "bdc"
+            st.rerun()
+
+    with col4:
+        st.markdown("""
+        <div class="project-card">
+            <div class="card-title">Dantewada Notifications</div>
+            <div class="card-body">
+                PDF scraping and data extraction from Dantewada district and CG Forest Department portals.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Notifications Portal", key="btn_dantewada", use_container_width=True):
+            st.session_state.active_app = "dantewada"
             st.rerun()
 
     # Footer

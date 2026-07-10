@@ -222,3 +222,47 @@ ALTER TABLE bdc.case_orders ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Read Access" ON bdc.cases FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON bdc.case_history FOR SELECT USING (true);
 CREATE POLICY "Public Read Access" ON bdc.case_orders FOR SELECT USING (true);
+
+-- ─── DIVERSIONS & NOTIFICATIONS SCHEMA TABLES ───
+
+-- 1. PDF tracking table (shared across both websites)
+CREATE TABLE IF NOT EXISTS diversions_and_notifications.processed_pdfs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_url TEXT UNIQUE NOT NULL,
+    source_website TEXT NOT NULL,        -- 'dantewada' or 'forest_cg'
+    title TEXT,
+    listing_date TEXT,
+    discovered_at TIMESTAMPTZ DEFAULT NOW(),
+    extracted_at TIMESTAMPTZ,
+    status TEXT DEFAULT 'pending',       -- 'pending', 'processed', or 'failed'
+    storage_url TEXT
+);
+
+-- 2. Extracted document data
+CREATE TABLE IF NOT EXISTS diversions_and_notifications.documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pdf_id UUID UNIQUE REFERENCES diversions_and_notifications.processed_pdfs(id) ON DELETE CASCADE,
+    district TEXT,
+    date_of_issuance TEXT,
+    village_name TEXT,
+    location_of_incident TEXT,
+    land_hectares TEXT,
+    source_website TEXT,
+    notification_reference_number TEXT,
+    authority_issuing_order TEXT,
+    purpose TEXT,
+    project_name TEXT,
+    applicant_name TEXT,
+    act_mentioned TEXT,
+    forest_types_involved JSONB,
+    khasra_numbers_involved JSONB,
+    additional_fields JSONB,
+    created_on TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RLS for diversions_and_notifications
+ALTER TABLE diversions_and_notifications.processed_pdfs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diversions_and_notifications.documents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public Read Access" ON diversions_and_notifications.processed_pdfs FOR SELECT USING (true);
+CREATE POLICY "Public Read Access" ON diversions_and_notifications.documents FOR SELECT USING (true);

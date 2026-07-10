@@ -39,6 +39,16 @@ graph TD
         BDC_Sync --> DB
         DB --> BDC_UI
     end
+
+    subgraph Dantewada & Forest CG Project
+        Hub --> Dantewada_UI[Dantewada & Forest CG Portal]
+        Dantewada_UI --> Dantewada_Sync[Local/CLI Scraper]
+        Dantewada_Sync --> Proxy_Fetch[Supabase SQL Proxy]
+        Dantewada_Sync --> Direct_Fetch[Direct HTTP Download]
+        Dantewada_Sync --> Gemini_Img[Gemini Image Extractor]
+        Gemini_Img --> DB
+        DB --> Dantewada_UI
+    end
 ```
 
 ---
@@ -163,6 +173,33 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
 
 ---
 
+## 4c. Data Flow: Dantewada & Forest CG Scrape
+
+### Stage 1: Discovery (Link Scraping)
+1. **Trigger**: Scraper CLI executes the discovery command (`--mode discover`).
+2. **Scraping**:
+   - **Dantewada Notifications**: Fetches direct pages of the district notifications portal.
+   - **Forest CG FCA Cases**: Scrapes the forest department list. Uses the Supabase India SQL proxy with automatic direct HTTP fallback if the database server is blocked.
+3. **Database registry**: Discovered links are upserted into `diversions_and_notifications.processed_pdfs` with a status of `pending`.
+
+### Stage 2: PDF Download & Image Rendering
+1. **Trigger**: Crawler pipeline runs in extraction mode (`--mode extract`).
+2. **Download**: Downloads raw PDF bytes (utilizing proxy with direct fallback).
+3. **Image Conversion**: Converts every page of the PDF into high-resolution JPEG images (at 200 DPI) using `PyMuPDF` (`fitz`).
+
+### Stage 3: LLM Multimodal Extraction
+1. **Chunking**: Page images are chunked into sets of 20 to comply with API limits.
+2. **Gemini Call**: Images are sent to **Gemini 3.1 Flash-Lite** (with fallback to **Gemini 2.5 Flash**) using a structured Pydantic response schema (`DocumentExtraction`).
+3. **Information Extraction**:
+   - **District**: Extracted with a strict prompt instruction ensuring sub-district divisions (blocks, tehsils like *Ramanujnagar*, or villages) are excluded.
+   - **Forest Land Classifications**: Parsed and returned as standardized English key mappings (e.g. `reserved_forest_land`, `protected_forest_land`) regardless of Hindi document terms.
+4. **Merge**: Aggregates properties extracted across multi-page chunks.
+
+### Stage 4: Storage & Sync
+1. **Database Save**: Saves the consolidated data into `diversions_and_notifications.documents`.
+2. **Storage Upload**: Uploads the PDF to Supabase Storage in the `diversions_and_notifications-pdfs` bucket and records the public URL.
+3. **Final Mark**: Marks the PDF status as `processed` in `processed_pdfs`.
+
 ---
 
 ## 5. Technical Infrastructure
@@ -181,6 +218,9 @@ To bypass the eCourts Web Application Firewall (WAF) which geoblocks cloud servi
   - `cases`: Main case details (CNR, Case Type, Case Year, Petitioner, Respondent, Status, Next Hearing Date).
   - `case_history`: Hearing logs with judge, purpose, and business text.
   - `case_orders`: PDF interim/final orders with storage paths.
+- **Schema `diversions_and_notifications`**:
+  - `processed_pdfs`: Registry of all discovered Dantewada / Forest CG PDF files, tracking scraping progress, source website, and storage URLs.
+  - `documents`: Extracted structured data from notifications (district, date, land area, act, khasra numbers, forest types).
 
 ### Shared Logic
 - **`common/document_processing.py`**: Standardized PDF-to-text extraction using `PyMuPDF`.

@@ -2,8 +2,8 @@ name: Supabase Keep-Alive
 
 on:
   schedule:
-    # Every 5 days at midnight UTC
-    - cron: '0 0 */5 * *'
+    # Every 3 days at midnight UTC — shorter interval against 7-day auto-pause
+    - cron: '0 0 */3 * *'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,8 @@ jobs:
           cache: 'pip'
       - name: Install Dependencies
         run: pip install -r requirements.txt
-      - name: Ping Both Supabase Databases
+
+      - name: Ensure keep_alive_log table exists
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_URL_INDIA: ${{ secrets.DATABASE_URL_INDIA }}
@@ -27,9 +28,45 @@ jobs:
           for key in ['DATABASE_URL', 'DATABASE_URL_INDIA']:
               try:
                   conn = psycopg2.connect(os.environ[key])
-                  conn.cursor().execute('SELECT 1')
+                  cur = conn.cursor()
+                  cur.execute(\"\"\"
+                      CREATE TABLE IF NOT EXISTS public.keep_alive_log (
+                          id         BIGSERIAL    PRIMARY KEY,
+                          pinged_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                          source     TEXT         NOT NULL DEFAULT 'github_actions'
+                      )
+                  \"\"\")
+                  cur.execute(\"\"\"
+                      CREATE INDEX IF NOT EXISTS idx_keep_alive_pinged_at
+                      ON public.keep_alive_log (pinged_at DESC)
+                  \"\"\")
+                  conn.commit()
                   conn.close()
-                  print(f'{key}: OK')
+                  print(f'{key}: table ready')
+              except Exception as e:
+                  print(f'{key}: table setup FAILED - {e}')
+                  raise
+          "
+
+      - name: Ping Both Supabase Databases with INSERT
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_INDIA: ${{ secrets.DATABASE_URL_INDIA }}
+        run: |
+          python -c "
+          import os, psycopg2
+          for key in ['DATABASE_URL', 'DATABASE_URL_INDIA']:
+              try:
+                  conn = psycopg2.connect(os.environ[key])
+                  cur = conn.cursor()
+                  # Quick health-check query
+                  cur.execute('SELECT 1')
+                  # Real write activity — forces WAL flushes on the compute,
+                  # which reliably resets Supabase's auto-pause timer
+                  cur.execute('INSERT INTO public.keep_alive_log (source) VALUES (%s)', (key,))
+                  conn.commit()
+                  conn.close()
+                  print(f'{key}: OK (ping recorded)')
               except Exception as e:
                   print(f'{key}: FAILED - {e}')
                   raise
