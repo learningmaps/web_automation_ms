@@ -44,61 +44,79 @@ def run_dantewada():
     st.title("Dantewada & Forest CG Notifications")
     st.caption("PDF scraping and extraction from government notification portals")
 
-    tab_pdfs, tab_docs = st.tabs(["Scraped PDFs", "Extracted Documents"])
+    tab_docs, tab_pdfs = st.tabs(["Extracted Documents", "Scraped PDFs"])
 
-    with tab_pdfs:
-        st.subheader("Scraped PDFs")
-        try:
-            df = load_pdfs()
-        except Exception as e:
-            st.error(f"Failed to load data: {e}")
-            df = pd.DataFrame()
+    # Helper functions for multi-value filtering and math
+    import re
+    def get_unique_items(series):
+        items = set()
+        for val in series.dropna():
+            for item in str(val).split(","):
+                cleaned = item.strip()
+                if cleaned:
+                    items.add(cleaned)
+        return sorted(list(items))
 
-        if df.empty:
-            st.info("No PDFs discovered yet. Run the scraper first.")
-        else:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total", len(df))
-            col2.metric("Processed", len(df[df["status"] == "processed"]))
-            col3.metric("Pending", len(df[df["status"] == "pending"]))
-            col4.metric("Failed", len(df[df["status"] == "failed"]))
+    def filter_by_multivalue(df, column, selected):
+        if not selected:
+            return df
+        def matches(val):
+            if not val:
+                return False
+            parts = {p.strip().lower() for p in str(val).split(",")}
+            return any(s.lower() in parts for s in selected)
+        return df[df[column].apply(matches)]
 
-            filter_source = st.selectbox("Filter by source", ["All", "dantewada", "forest_cg"], key="pdf_source")
-            if filter_source != "All":
-                df = df[df["source_website"] == filter_source]
-
-            display_cols = ["title", "source_website", "listing_date", "status", "source_url"]
-            st.dataframe(
-                df[display_cols],
-                use_container_width=True,
-                column_config={
-                    "title": st.column_config.TextColumn("Title", width="large"),
-                    "source_website": st.column_config.TextColumn("Source"),
-                    "listing_date": st.column_config.TextColumn("Date"),
-                    "status": st.column_config.TextColumn("Status"),
-                    "source_url": st.column_config.LinkColumn("PDF Link"),
-                },
-                height=500,
-            )
+    def extract_numeric_ha(val):
+        if not val:
+            return 0.0
+        match = re.search(r"(\d+\.?\d*)", str(val))
+        return float(match.group(1)) if match else 0.0
 
     with tab_docs:
         st.subheader("Extracted Document Data")
         try:
-            df = load_documents()
+            df_docs = load_documents()
         except Exception as e:
             st.error(f"Failed to load data: {e}")
-            df = pd.DataFrame()
+            df_docs = pd.DataFrame()
 
-        if df.empty:
+        if df_docs.empty:
             st.info("No documents extracted yet.")
         else:
-            col1, col2 = st.columns(2)
-            col1.metric("Total Documents", len(df))
-            col2.metric("Sources", df["source_website"].nunique())
+            # Filter layout
+            with st.expander("Filter Extracted Documents", expanded=True):
+                col_f1, col_f2, col_f3 = st.columns(3)
+                
+                sources = sorted(df_docs["source_website"].dropna().unique()) if "source_website" in df_docs.columns else []
+                selected_sources = col_f1.multiselect("Sources", options=sources, default=sources)
+                
+                districts = get_unique_items(df_docs["district"]) if "district" in df_docs.columns else []
+                selected_districts = col_f2.multiselect("Districts", options=districts)
+                
+                villages = get_unique_items(df_docs["village_name"]) if "village_name" in df_docs.columns else []
+                selected_villages = col_f3.multiselect("Villages", options=villages)
 
-            filter_source = st.selectbox("Filter by source", ["All", "dantewada", "forest_cg"], key="doc_source")
-            if filter_source != "All":
-                df = df[df["source_website"] == filter_source]
+            # Apply filters
+            filtered_docs = df_docs.copy()
+            if selected_sources:
+                filtered_docs = filtered_docs[filtered_docs["source_website"].isin(selected_sources)]
+            if selected_districts:
+                filtered_docs = filter_by_multivalue(filtered_docs, "district", selected_districts)
+            if selected_villages:
+                filtered_docs = filter_by_multivalue(filtered_docs, "village_name", selected_villages)
+
+            # Calculate and display metrics
+            total_docs = len(filtered_docs)
+            total_ha = filtered_docs["land_hectares"].apply(extract_numeric_ha).sum() if "land_hectares" in filtered_docs.columns else 0.0
+            num_districts = len(get_unique_items(filtered_docs["district"])) if "district" in filtered_docs.columns else 0
+            num_villages = len(get_unique_items(filtered_docs["village_name"])) if "village_name" in filtered_docs.columns else 0
+
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Total Documents", total_docs)
+            col_m2.metric("Total Area (Hectares)", f"{total_ha:.2f} ha")
+            col_m3.metric("Districts Involved", num_districts)
+            col_m4.metric("Villages Involved", num_villages)
 
             display_cols = [
                 "title", "source_website", "district", "date_of_issuance",
@@ -111,13 +129,13 @@ def run_dantewada():
 
             fmt = lambda x: "" if x in (None, "") else x
             for col in ["forest_types_involved", "khasra_numbers_involved", "additional_fields"]:
-                if col in df.columns:
-                    df[col] = df[col].apply(fmt).apply(
+                if col in filtered_docs.columns:
+                    filtered_docs[col] = filtered_docs[col].apply(fmt).apply(
                         lambda x: "" if not x else (", ".join(x) if isinstance(x, list) else x)
                     )
 
             st.dataframe(
-                df[display_cols],
+                filtered_docs[display_cols],
                 use_container_width=True,
                 column_config={
                     "title": st.column_config.TextColumn("Title", width="large"),
@@ -136,6 +154,41 @@ def run_dantewada():
                     "forest_types_involved": st.column_config.TextColumn("Forest Types"),
                     "khasra_numbers_involved": st.column_config.TextColumn("Khasra #"),
                     "storage_url": st.column_config.LinkColumn("PDF"),
+                },
+                height=500,
+            )
+
+    with tab_pdfs:
+        st.subheader("Scraped PDFs")
+        try:
+            df_pdfs = load_pdfs()
+        except Exception as e:
+            st.error(f"Failed to load data: {e}")
+            df_pdfs = pd.DataFrame()
+
+        if df_pdfs.empty:
+            st.info("No PDFs discovered yet. Run the scraper first.")
+        else:
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total", len(df_pdfs))
+            col2.metric("Processed", len(df_pdfs[df_pdfs["status"] == "processed"]))
+            col3.metric("Pending", len(df_pdfs[df_pdfs["status"] == "pending"]))
+            col4.metric("Failed", len(df_pdfs[df_pdfs["status"] == "failed"]))
+
+            filter_source = st.selectbox("Filter by source", ["All", "dantewada", "forest_cg"], key="pdf_source")
+            if filter_source != "All":
+                df_pdfs = df_pdfs[df_pdfs["source_website"] == filter_source]
+
+            display_cols = ["title", "source_website", "listing_date", "status", "source_url"]
+            st.dataframe(
+                df_pdfs[display_cols],
+                use_container_width=True,
+                column_config={
+                    "title": st.column_config.TextColumn("Title", width="large"),
+                    "source_website": st.column_config.TextColumn("Source"),
+                    "listing_date": st.column_config.TextColumn("Date"),
+                    "status": st.column_config.TextColumn("Status"),
+                    "source_url": st.column_config.LinkColumn("PDF Link"),
                 },
                 height=500,
             )

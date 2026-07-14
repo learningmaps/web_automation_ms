@@ -13,9 +13,9 @@ on:
         required: true
         default: 'both'
 
-  # Also runs once a week automatically (Mondays at 08:00 UTC)
+  # Also runs once a week automatically (Wednesdays at 08:00 UTC)
   schedule:
-    - cron: '0 8 * * 1'
+    - cron: '0 8 * * 3'
 
 jobs:
   run-pipeline:

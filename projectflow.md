@@ -101,6 +101,16 @@ graph TD
   - **Case List**: Displays a filterable table of court cases. Supports interactive row selection (`on_select="rerun"`) to dynamically load details of the selected case below.
   - **Case Details Viewer**: Continuous vertical dossier docket showing overview, parties, acts & sections, FIR details, hearing history, and PDF order tables in stacked visual cards (enabling seamless page-level Ctrl+F text searches).
 
+### 2.5 Dantewada & Forest CG Portal (`projects/dantewada_scrape/app.py`)
+- **Extracted Documents Tab (Primary)**:
+  - **Metrics Bar**: Displays Total Documents, Total Area (Hectares) parsed from land hectares text, Districts Involved, and Villages Involved.
+  - **Filters Expanders**: Multiselect dropdowns for Sources, Districts, and Villages. Handles filtering for comma-separated items.
+  - **Data Table**: Displays extracted columns such as district, village, land hectares, purpose, and PDF links.
+- **Scraped PDFs Tab (Secondary)**:
+  - **Metrics Bar**: Displays Total, Processed, Pending, and Failed PDFs.
+  - **Filter**: Dropdown to filter by Source Website.
+  - **Data Table**: Tracks URL, title, discovery date, and processing status.
+
 ---
 
 ## 3. Data Flow: MSTC Mineral Blocks

@@ -3,8 +3,8 @@ name: Dantewada & Forest CG PDF Scraper
 on:
   workflow_dispatch:
   schedule:
-    # Run weekly on Monday at 3 PM UTC
-    - cron: '0 15 * * 1'
+    # Run weekly on Friday at 3 PM UTC
+    - cron: '0 15 * * 5'
 
 jobs:
   scrape-and-extract:
