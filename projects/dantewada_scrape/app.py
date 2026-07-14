@@ -84,20 +84,58 @@ def run_dantewada():
         if df_docs.empty:
             st.info("No documents extracted yet.")
         else:
+            # Initialize session states for filters if not present
+            if "sel_sources" not in st.session_state:
+                st.session_state["sel_sources"] = sorted(df_docs["source_website"].dropna().unique().tolist()) if "source_website" in df_docs.columns else []
+            if "sel_districts" not in st.session_state:
+                st.session_state["sel_districts"] = []
+            if "sel_villages" not in st.session_state:
+                st.session_state["sel_villages"] = []
+
+            # Retrieve active filter selections from state
+            active_sources = st.session_state["sel_sources"]
+            active_districts = st.session_state["sel_districts"]
+            active_villages = st.session_state["sel_villages"]
+
+            # Compute Source Options based on District and Village filters
+            df_for_sources = df_docs.copy()
+            if active_districts:
+                df_for_sources = filter_by_multivalue(df_for_sources, "district", active_districts)
+            if active_villages:
+                df_for_sources = filter_by_multivalue(df_for_sources, "village_name", active_villages)
+            sources_options = sorted(df_for_sources["source_website"].dropna().unique().tolist()) if "source_website" in df_for_sources.columns else []
+
+            # Compute District Options based on Source and Village filters
+            df_for_districts = df_docs.copy()
+            if active_sources:
+                df_for_districts = df_for_districts[df_for_districts["source_website"].isin(active_sources)]
+            if active_villages:
+                df_for_districts = filter_by_multivalue(df_for_districts, "village_name", active_villages)
+            districts_options = get_unique_items(df_for_districts["district"]) if "district" in df_for_districts.columns else []
+
+            # Compute Village Options based on Source and District filters
+            df_for_villages = df_docs.copy()
+            if active_sources:
+                df_for_villages = df_for_villages[df_for_villages["source_website"].isin(active_sources)]
+            if active_districts:
+                df_for_villages = filter_by_multivalue(df_for_villages, "district", active_districts)
+            villages_options = get_unique_items(df_for_villages["village_name"]) if "village_name" in df_for_villages.columns else []
+
             # Filter layout
             with st.expander("Filter Extracted Documents", expanded=True):
                 col_f1, col_f2, col_f3 = st.columns(3)
                 
-                sources = sorted(df_docs["source_website"].dropna().unique()) if "source_website" in df_docs.columns else []
-                selected_sources = col_f1.multiselect("Sources", options=sources, default=sources)
+                # Safeguard defaults to ensure selected items exist within the computed option sets
+                default_sources = [s for s in active_sources if s in sources_options]
+                selected_sources = col_f1.multiselect("Sources", options=sources_options, default=default_sources, key="sel_sources")
                 
-                districts = get_unique_items(df_docs["district"]) if "district" in df_docs.columns else []
-                selected_districts = col_f2.multiselect("Districts", options=districts)
+                default_districts = [d for d in active_districts if d in districts_options]
+                selected_districts = col_f2.multiselect("Districts", options=districts_options, default=default_districts, key="sel_districts")
                 
-                villages = get_unique_items(df_docs["village_name"]) if "village_name" in df_docs.columns else []
-                selected_villages = col_f3.multiselect("Villages", options=villages)
+                default_villages = [v for v in active_villages if v in villages_options]
+                selected_villages = col_f3.multiselect("Villages", options=villages_options, default=default_villages, key="sel_villages")
 
-            # Apply filters
+            # Final filtered dataset applying all filters
             filtered_docs = df_docs.copy()
             if selected_sources:
                 filtered_docs = filtered_docs[filtered_docs["source_website"].isin(selected_sources)]
