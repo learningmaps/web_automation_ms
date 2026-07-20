@@ -15,7 +15,7 @@ from parivesh_auto.constants import KEYWORDS, TABLE_NAME
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone Parivesh Scraper Runner")
-    parser.add_argument("--limit", type=int, default=50, help="Maximum number of PDFs to process")
+    parser.add_argument("--limit", type=int, default=100, help="Maximum number of PDFs to process")
     args = parser.parse_args()
 
     db_url = os.getenv("DATABASE_URL")

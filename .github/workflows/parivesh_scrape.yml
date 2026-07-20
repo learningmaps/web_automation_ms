@@ -6,7 +6,7 @@ on:
       limit:
         description: 'Number of PDFs to process'
         required: false
-        default: '50'
+        default: '100'
 
   # Run once a week automatically (Mondays at 03:00 UTC)
   schedule:
@@ -41,4 +41,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           PYTHONPATH: .
         run: |
-          python projects/parivesh_auto/run_scraper.py --limit ${{ github.event.inputs.limit || '50' }}
+          python projects/parivesh_auto/run_scraper.py --limit ${{ github.event.inputs.limit || '100' }}

@@ -195,7 +195,7 @@ def load_base_metrics():
         conn.close()
     return {"unprocessed": unprocessed, "keyword_matches": keyword_matches}
 
-def trigger_parivesh_scrape_workflow(limit=50):
+def trigger_parivesh_scrape_workflow(limit=100):
     token = get_secret("GITHUB_TOKEN")
     repo = get_secret("GITHUB_REPO")
     if not token or not repo:
@@ -337,7 +337,7 @@ def run_parivesh():
         st.write("")
         c_gh1, c_gh2 = st.columns([1.2, 2])
         with c_gh1:
-            limit_gh = st.number_input("Limit (GitHub Action)", min_value=1, max_value=500, value=50, step=10, label_visibility="collapsed")
+            limit_gh = st.number_input("Limit (GitHub Action)", min_value=1, max_value=500, value=100, step=10, label_visibility="collapsed")
         with c_gh2:
             if st.button("Trigger GitHub Action", use_container_width=True):
                 if trigger_parivesh_scrape_workflow(limit=limit_gh):
